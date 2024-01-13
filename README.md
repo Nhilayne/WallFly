@@ -1,1 +1,3 @@
 # WallFly
+
+Using wi-fi enabled wireless access points, it is possible to gather information such as signal strength, mac address, and in more recent standards, the round-trip time of data sent to wireless enabled devices within range without requiring an established connection. This project will use these data points in conjunction with multiple wireless access points to create a system that can calculate the location of each device in range, and the path it takes through the coverage area over time, to provide the system user insight into high traffic areas, repeat visitors, and foot traffic pathing.
