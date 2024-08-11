@@ -61,6 +61,9 @@ def main():
                     else:
                         msg=msg.decode()
                         data = msg.split('|')
+                        if data[0] == 'init':
+                            convertedPosition = tuple(float(x) for x in data[2].split(','))
+                            networkPositions[data[1]] = convertedPosition
                         # data.append(address[0])
                         # print(data)
                         hashed_mac = privatize(data[0])
