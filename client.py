@@ -6,8 +6,18 @@ import struct
 from scapy.all import sniff, Dot11
 import uuid
 
-devices = set()
-send_buffer = []
+def get_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--interface", "-i", default="wlan1", help="Network Monitoring Interface")
+    parser.add_argument("--server", "-s", help="Processing Server IP")
+    parser.add_argument("--port", "-p", default=8505, help="Processing Server Port")
+    parser.add_argument("--location", "-l", default="0,0,0", help="")
+    return parser.parse_args()
+
+def init_connection(server, port):
+    connection = socket.socket()
+    connection.connect((server, int(port)))
+    return connection
 
 def get_mac_address():
     id = uuid.getnode()
@@ -15,6 +25,7 @@ def get_mac_address():
     return id_formatted.lower()
 
 def handle_packet(pkt):
+    global send_buffer
     if not pkt.haslayer(Dot11):
         return None
     if pkt.type == 0 and pkt.subtype == 4:
@@ -31,27 +42,34 @@ def close():
     pass
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--interface", "-i", default="wlan1", help="Network Monitoring Interface")
-    parser.add_argument("--server", "-s", help="Processing Server IP")
-    parser.add_argument("--port", "-p", default=8505, help="Processing Server Port")
-    parser.add_argument("--location", "-l", default="0,0,0", help="")
-    args = parser.parse_args()
-    
-    location = args.location.split(',')
-    clientID = get_mac_address()
-    initMsg = f'init|{clientID}|{args.location}'
 
-    conn = socket.socket()
-    conn.connect((args.server, int(args.port)))
+    args = get_args()
+    
+    clientID = get_mac_address()
+
+   
+    conn = init_connection(args.server,args.port)
+    
+    initMsg = f'init|{clientID}|{args.location}'
 
     conn.send(initMsg.encode())
 
+    send_buffer = []
     
     while True:
         try:
             sniff(iface=args.interface, prn=handle_packet, timeout=0.01)
-
+            readSockets,_,_ = select.select([conn],[],[],0)
+            for packet in readSockets:
+                msg = packet.recv(1028)
+                if not msg:
+                    print('connection closed')
+                    conn.close()
+                    exit()
+                else:
+                    data = msg.decode()
+                    print(f'recvd {data}')
+                    
             for data in send_buffer:
                 conn.send(data.encode())
                 send_buffer.remove(data)
