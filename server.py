@@ -1,3 +1,4 @@
+import sys
 import socket
 import argparse
 import time
@@ -7,53 +8,122 @@ from multiprocessing import pool
 import pandas as pd
 import uuid 
 
+def get_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--address", "-a", default="localhost", help="IP for server")
+    parser.add_argument("--port", "-p", default=8505, help="Listening Port")
+    parser.add_argument("--databaseAddress", "-da", default=None, help="Database IP")
+    parser.add_argument("--databasePort", "-dp", default=None, help="Database port")
+    #parser.add_argument("--interface", "-i", default="wlan0", help="Network interface")
+    return parser.parse_args()
+
+def init_server(address, port):
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind((address, int(port)))
+    server.setblocking(False)
+    server.listen()
+    return server
+
+def connect_db(dbAddress, dbPort):
+    if dbAddress or dbPort is None:
+        print("No database connection, exporting as .csv")
+        return None
+    else:
+        print(f"connecting to database at {dbAddress}:{dbPort} [Currently unimplemented]")
+        return None
+
 def get_mac_address():
     id = uuid.getnode()
     id_formatted = ':'.join(('%012x'%id)[i:i+2] for i in range(1,12,2))
     return id_formatted.lower()
 
+def init_data_defaults(server):
+    physicalLocations = {server:(0,0,0)}
+
+    # (x,y,z) for an xy floorplan, z as depth
+    recvDf = pd.DataFrame(columns=['mac','rssi','time', 'ip'])
+    recvDf = recvDf.sort_values(by=['mac', 'time'])
+
+    return physicalLocations, recvDf
+
+def menu(cmd):
+    try:
+        choice = int(cmd)
+    except:
+        print('Please enter a number')
+        return None
+    if choice in range(1,11):
+        pass
+        # break
+    # print('Please enter a valid number')
+
+    return choice
+
+def read_sockets():
+   pass
+
 def privatize(mac):
     hashed = hashlib.sha256(mac.encode(), usedforsecurity=True).hexdigest()
     print(f'hashed mac:{hashed}')
-    return hashed
-    
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--address", "-a", default="localhost", help="IP for server")
-    parser.add_argument("--port", "-p", default=8505, help="Listening Port")
-    parser.add_argument("--database", "-d", help="Database source")
-    #parser.add_argument("--interface", "-i", default="wlan0", help="Network interface")
-    args = parser.parse_args()
-    
-    
+    return hashed    
 
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind((args.address, int(args.port)))
-    server.setblocking(False)
-    server.listen()
+def main():
+
+    args = get_args()
+
+    server = init_server(args.address, args.port)    
+
+    db = connect_db(args.databaseAddress, args.dbPort)
 
     connections = [server]
 
     serverID = get_mac_address()
 
-    # (x,y,z) for an xy floorplan, z as depth
-    networkPositions = {
-        serverID:(0,0,0)
-    }
+    networkPositions, inputSet = init_data_defaults(serverID)
 
-
-    input_set = pd.DataFrame(columns=['mac','rssi','time', 'ip'])
-    input_set = input_set.sort_values(by=['mac', 'time'])
-
+    print(f'\n\nSelect an action:')
+    print(f'1: Display Current Connections \t 3: Display Buffer Tail')
+    print(f'2: Send Network List to Clients \t 4: Disconnect Clients')
+    print(f'5: Exit')
     while True:
         try:        
-            read_sockets,_,_ = select.select(connections,[],[],0)
-            for connection in read_sockets:
+            readSockets,_,_ = select.select(connections,[],[],0)
+            userInput, _, _ = select.select([sys.stdin], [], [], 0)
+
+            if userInput:
+                input = menu(sys.stdin.readline().strip())
+
+            newLocationData = read_sockets(readSockets)
+            match(input):
+                case(1):
+                    #display all active connections
+                    for connection in connections:
+                        if connection == server:
+                            print(f'server:{connection}')
+                        elif connection == db:
+                            print(f'database:{connection}')
+                        else:
+                            print(connection)
+                case(1):
+                    #send mac list to all connected clients
+                    for x in networkPositions:
+                        print(f'attempting to send{x}')
+                case(1):
+                    #show current data
+                    print(inputSet.tail(6))
+                case(4):
+                    #disconnect
+                    server.close()
+                case(5):
+                    #close out app
+                    exit()
+                    
+            for connection in readSockets:
                 if connection == server:
                     client_connection, address = server.accept()
                     print(f'New connection from {address[0]}')
                     connections.append(client_connection)
-                    client_connection.send(networkPositions.keys.encode())
+                    #client_connection.send(networkPositions.keys.encode())
                 else:
                     msg = connection.recv(1024)
                     if not msg:
@@ -71,7 +141,7 @@ def main():
                         timestamp =data[2]
                         src = address[0]
                         row =pd.DataFrame({'mac':[hashed_mac], 'rssi':[rssi], 'time':[timestamp], 'ip':[src]})
-                        input_set = pd.concat([input_set,row], ignore_index=True)
+                        inputSet = pd.concat([inputSet,row], ignore_index=True)
             pass
             # process_set = getNext(input_set)
             # location = calcPosition(process_set)
@@ -80,7 +150,7 @@ def main():
 
         except KeyboardInterrupt:
             server.close()
-            print(input_set.head(10))
+            print(inputSet.head(10))
             print(networkPositions.keys)
             exit()
 
