@@ -92,7 +92,7 @@ def main():
 
     print(f'\n\nSelect an action:')
     print(f'1: Display Current Connections \t 4: Disconnect Clients')
-    print(f'2: Send Mac Blacklist \t\t 5: Exit')
+    print(f'2: Distribute Client List \t 5: Exit')
     print(f'3: Display Buffer Tail')
     while True:
         try:        
@@ -108,35 +108,38 @@ def main():
                 case(1):
                     #display all active connections
                     for connection in connections:
-                        ip,port = connection.getsockname()
                         if connection == server:
+                            ip,port = connection.getsockname()
                             print(f'server: {ip}:{port}')
                         elif connection == db:
+                            ip,port = connection.getpeername()
                             print(f'database: {ip}:{port}')
                         else:
+                            ip,port = connection.getpeername()
                             print(f'client: {ip}:{port}')
                 case(2):
                     #send mac list to all connected clients
                     for connection in connections:
-                        ip,port = connection.getsockname()
                         if connection != server or db:
+                            ip,port = connection.getpeername()
                             for key, value in networkPositions.items():
-                                print(f'sending {key}{value} to {ip}{port}')
-                                connection.send(f'update|{key}|{value}'.encode())
+                                print(f'sending {key}{value} to {ip}:{port}')
+                                connection.sendall(f'update|{key}|{value}'.encode())
 
                 case(3):
                     #show current data
                     print(inputSet.tail(6))
                 case(4):
                     #disconnect clients
+                    tempConnections = []
                     for connection in connections:
-                        if connection == server:
-                            pass
-                        elif connection == db:
-                            pass
-                        else:
+                        if connection != server or db:
+                            print(f'closing {connection}')
                             connection.close()
-                            connections.remove(connection)
+                        else:
+                            tempConnections.append(connection)
+                    connections.clear()
+                    connections = tempConnections
                 case(5):
                     #close out app
                     exit()

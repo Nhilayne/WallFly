@@ -40,7 +40,7 @@ def handle_packet(pkt):
                 networkStrength[key] = rssi
                 print(f'updated {key} to {rssi}')
                 return
-            data.append(f'|{value}')
+            data += (f'|{value}')
         # print(data)
         send_buffer.append(data)
 
@@ -102,13 +102,21 @@ def main():
                 else:
                     data = msg.decode()
                     print(f'recvd {data}')
-                    data = data.split("|")
-                    if data[0] == 'update':
+                    data = data.split('update')
+                    for msg in data:
+                        if msg =='':
+                            continue
+                        print(msg)
+                        msg = msg.split('|')
+                        print(msg[1])
+                        networkStrength[msg[1]] = 0
+                    # if data[0] == 'update':
                         # position = tuple(float(x) for x in data[2][1:-1].split(','))
                         # print(f'testing::{position[0]}+{position[1]}+{position[2]}')
                         # convertedDistance = round(math.sqrt(position[0]**2+position[1]**2+position[2]**2),3)
                         # print(f'abs dist: {convertedDistance}')
-                        networkStrength[data[1]] = 0
+                        # print(data[1])
+                        # networkStrength[data[1]] = 0
 
             # send sniffed data to server and remove from queue
             for data in send_buffer:
