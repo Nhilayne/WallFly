@@ -37,8 +37,8 @@ def get_mac_address():
     id_formatted = ':'.join(('%012x'%id)[i:i+2] for i in range(1,12,2))
     return id_formatted.lower()
 
-def init_data_defaults(server):
-    physicalLocations = {server:(0,0,0)}
+def init_data_defaults(serverMac):
+    physicalLocations = {serverMac:(0,0,0)}
 
     # (x,y,z) for an xy floorplan, z as depth
     recvDf = pd.DataFrame(columns=['mac','rssi','time', 'ip'])
@@ -73,7 +73,7 @@ def main():
 
     server = init_server(args.address, args.port)    
 
-    db = connect_db(args.databaseAddress, args.dbPort)
+    db = connect_db(args.databaseAddress, args.databasePort)
 
     connections = [server]
 
@@ -82,38 +82,51 @@ def main():
     networkPositions, inputSet = init_data_defaults(serverID)
 
     print(f'\n\nSelect an action:')
-    print(f'1: Display Current Connections \t 3: Display Buffer Tail')
-    print(f'2: Send Network List to Clients \t 4: Disconnect Clients')
-    print(f'5: Exit')
+    print(f'1: Display Current Connections \t 4: Disconnect Clients')
+    print(f'2: Send Mac Blacklist \t\t 5: Exit')
+    print(f'3: Display Buffer Tail')
     while True:
         try:        
             readSockets,_,_ = select.select(connections,[],[],0)
             userInput, _, _ = select.select([sys.stdin], [], [], 0)
 
+            input = None
             if userInput:
                 input = menu(sys.stdin.readline().strip())
 
-            newLocationData = read_sockets(readSockets)
+            # newLocationData = read_sockets(readSockets)
             match(input):
                 case(1):
                     #display all active connections
                     for connection in connections:
+                        ip,port = connection.getsockname()
                         if connection == server:
-                            print(f'server:{connection}')
+                            print(f'server: {ip}:{port}')
                         elif connection == db:
-                            print(f'database:{connection}')
+                            print(f'database: {ip}:{port}')
                         else:
-                            print(connection)
-                case(1):
+                            print(f'client: {ip}:{port}')
+                case(2):
                     #send mac list to all connected clients
-                    for x in networkPositions:
-                        print(f'attempting to send{x}')
-                case(1):
+                    for connection in connections:
+                        if connection != server or db:
+                            for key, value in networkPositions.items():
+                                print(f'sending {key}{value} to {connection}')
+                                connection.send(f'{key}{value}'.encode())
+
+                case(3):
                     #show current data
                     print(inputSet.tail(6))
                 case(4):
-                    #disconnect
-                    server.close()
+                    #disconnect clients
+                    for connection in connections:
+                        if connection == server:
+                            pass
+                        elif connection == db:
+                            pass
+                        else:
+                            connection.close()
+                            connections.remove(connection)
                 case(5):
                     #close out app
                     exit()
