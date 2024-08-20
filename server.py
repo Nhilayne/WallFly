@@ -162,7 +162,7 @@ def main():
                             networkPositions[data[1]] = convertedPosition
                             continue
                         # data.append(address[0])
-                        print(data)
+                        print(f'{address[0]} sent {data}')
                         hashed_mac = privatize(data[0])
                         rssi = data[1]
                         timestamp = data[2]

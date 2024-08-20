@@ -120,6 +120,7 @@ def main():
 
             # send sniffed data to server and remove from queue
             for data in send_buffer:
+                print(f'sending{data}')
                 conn.send(data.encode())
                 send_buffer.remove(data)
             
