@@ -64,7 +64,7 @@ def read_sockets():
 
 def privatize(mac):
     hashed = hashlib.sha256(mac.encode(), usedforsecurity=True).hexdigest()
-    print(f'hashed mac:{hashed}')
+    # print(f'hashed mac:{hashed}')
     return hashed    
 
 def main():
@@ -112,7 +112,7 @@ def main():
                         if connection != server or db:
                             for key, value in networkPositions.items():
                                 print(f'sending {key}{value} to {connection}')
-                                connection.send(f'{key}{value}'.encode())
+                                connection.send(f'update|{key}|{value}'.encode())
 
                 case(3):
                     #show current data
@@ -147,6 +147,7 @@ def main():
                         if data[0] == 'init':
                             convertedPosition = tuple(float(x) for x in data[2].split(','))
                             networkPositions[data[1]] = convertedPosition
+                            continue
                         # data.append(address[0])
                         # print(data)
                         hashed_mac = privatize(data[0])

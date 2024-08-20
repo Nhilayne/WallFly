@@ -1,6 +1,7 @@
 import socket
 import argparse
 import select
+import math
 import time
 import struct
 from scapy.all import sniff, Dot11, Dot11Beacon, Dot11Elt, RadioTap, RandMAC, sendp
@@ -94,10 +95,13 @@ def main():
                 else:
                     data = msg.decode()
                     print(f'recvd {data}')
+                    data = data.split("|")
                     if data[0] == 'update':
-                        convertedPosition = tuple(float(x) for x in data[2].split(','))
-                        print(f'testing::{convertedPosition[1]}+{convertedPosition[2]}+{convertedPosition[3]}')
-                        networkBlacklist[data[1]] = convertedPosition
+                        position = tuple(float(x) for x in data[2][1:-1].split(','))
+                        print(f'testing::{position[0]}+{position[1]}+{position[2]}')
+                        convertedDistance = round(math.sqrt(position[0]**2+position[1]**2+position[2]**2),3)
+                        print(f'abs dist: {convertedDistance}')
+                        networkBlacklist[data[1]] = convertedDistance
 
             # send sniffed data to server and remove from queue
             for data in send_buffer:
@@ -114,6 +118,7 @@ def main():
             if environmentBaselineTimer >= 10:
                 environmentBaselineTimer = 0
                 frame = create_ping_request()
+                print("broadcast sending")
                 sendp(frame, iface=args.interface, verbose=False)
 
         except KeyboardInterrupt:
