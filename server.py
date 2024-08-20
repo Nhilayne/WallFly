@@ -81,6 +81,15 @@ def main():
 
     networkPositions, inputSet = init_data_defaults(serverID)
 
+    ###############################
+    # # calc distance between server and a client node
+    # position = tuple(float(x) for x in data[2][1:-1].split(','))
+    # print(f'testing::{position[0]}+{position[1]}+{position[2]}')
+    # convertedDistance = round(math.sqrt(position[0]**2+position[1]**2+position[2]**2),3)
+    # print(f'abs dist: {convertedDistance}')
+    # networkBlacklist[data[1]] = convertedDistance
+    ###############################
+
     print(f'\n\nSelect an action:')
     print(f'1: Display Current Connections \t 4: Disconnect Clients')
     print(f'2: Send Mac Blacklist \t\t 5: Exit')
@@ -109,9 +118,10 @@ def main():
                 case(2):
                     #send mac list to all connected clients
                     for connection in connections:
+                        ip,port = connection.getsockname()
                         if connection != server or db:
                             for key, value in networkPositions.items():
-                                print(f'sending {key}{value} to {connection}')
+                                print(f'sending {key}{value} to {ip}{port}')
                                 connection.send(f'update|{key}|{value}'.encode())
 
                 case(3):
@@ -149,10 +159,10 @@ def main():
                             networkPositions[data[1]] = convertedPosition
                             continue
                         # data.append(address[0])
-                        # print(data)
+                        print(data)
                         hashed_mac = privatize(data[0])
                         rssi = data[1]
-                        timestamp =data[2]
+                        timestamp = data[2]
                         src = address[0]
                         row =pd.DataFrame({'mac':[hashed_mac], 'rssi':[rssi], 'time':[timestamp], 'ip':[src]})
                         inputSet = pd.concat([inputSet,row], ignore_index=True)

@@ -35,6 +35,12 @@ def handle_packet(pkt):
         # devices.add(mac_addr)
         # print(pkt)
         data = (f'{mac_addr}|{rssi}|{pkt.time}')
+        for key, value in networkStrength.items():
+            if mac_addr == key.upper():
+                networkStrength[key] = rssi
+                print(f'updated {key} to {rssi}')
+                return
+            data.append(f'|{value}')
         # print(data)
         send_buffer.append(data)
 
@@ -76,10 +82,11 @@ def main():
 
     global send_buffer
     send_buffer = []
-    
-    networkBlacklist = {clientID:(args.location)}
+
+    global networkStrength
+    networkStrength = {clientID:0}
+
     environmentBaselineTimer = 0
-    environmentBaselineMonitor = {}
     while True:
         try:
             sniff(iface=args.interface, prn=handle_packet, timeout=0.01)
@@ -89,7 +96,7 @@ def main():
             for packet in readSockets:
                 msg = packet.recv(1028)
                 if not msg:
-                    print('connection closed')
+                    print('Server connection closed')
                     conn.close()
                     exit()
                 else:
@@ -97,25 +104,25 @@ def main():
                     print(f'recvd {data}')
                     data = data.split("|")
                     if data[0] == 'update':
-                        position = tuple(float(x) for x in data[2][1:-1].split(','))
-                        print(f'testing::{position[0]}+{position[1]}+{position[2]}')
-                        convertedDistance = round(math.sqrt(position[0]**2+position[1]**2+position[2]**2),3)
-                        print(f'abs dist: {convertedDistance}')
-                        networkBlacklist[data[1]] = convertedDistance
+                        # position = tuple(float(x) for x in data[2][1:-1].split(','))
+                        # print(f'testing::{position[0]}+{position[1]}+{position[2]}')
+                        # convertedDistance = round(math.sqrt(position[0]**2+position[1]**2+position[2]**2),3)
+                        # print(f'abs dist: {convertedDistance}')
+                        networkStrength[data[1]] = 0
 
             # send sniffed data to server and remove from queue
             for data in send_buffer:
                 conn.send(data.encode())
                 send_buffer.remove(data)
             
-            # broadcast ping request for other clients to sniff 10x per second.
+            # broadcast ping request for other clients to sniff ~10x per second.
             ##########
             # with distance known from server provided blacklist,
             # the current radio environment can be potentially measured 
             # and relayed to server to assist with processing.
             ##########
             environmentBaselineTimer += 1
-            if environmentBaselineTimer >= 10:
+            if environmentBaselineTimer >= 1000:
                 environmentBaselineTimer = 0
                 frame = create_ping_request()
                 print("broadcast sending")
