@@ -162,12 +162,13 @@ def main():
                             networkPositions[data[1]] = convertedPosition
                             continue
                         # data.append(address[0])
-                        print(f'{address[0]} sent {data}')
+                        ip, _ = connection.getpeername()
+                        print(f'{ip} sent {data}')
                         hashed_mac = privatize(data[0])
                         rssi = data[1]
                         timestamp = data[2]
-                        src = address[0]
-                        row =pd.DataFrame({'mac':[hashed_mac], 'rssi':[rssi], 'time':[timestamp], 'ip':[src]})
+                        src = ip
+                        row = pd.DataFrame({'mac':[hashed_mac], 'rssi':[rssi], 'time':[timestamp], 'ip':[src]})
                         inputSet = pd.concat([inputSet,row], ignore_index=True)
             pass
             # process_set = getNext(input_set)
