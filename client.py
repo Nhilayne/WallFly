@@ -6,6 +6,13 @@ import time
 import struct
 from scapy.all import sniff, Dot11, Dot11Beacon, Dot11Elt, RadioTap, RandMAC, sendp
 import uuid
+import threading
+import subprocess
+import datetime
+import ntplib
+from time import ctime, sleep
+import os
+
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -67,12 +74,38 @@ def create_ping_request():
 def close():
     pass
 
+#
+####
+def synchronized_start():
+    currentTime = datetime.datetime.now()
+    timeToWait = 1.0 - (currentTime.microsecond / 1000000.0)
+    time.sleep(timeToWait)
+
+def channel_hopper(interface, channels, interval):
+    while True:
+        for channel in channels:
+            subprocess.call(['iwconfig',interface,'channel',str(channel)])
+            time.sleep(interval)
+
+def sync_ntp_time(ntpServer='192.168.4.1'):
+    ntpClient = ntplib.NTPClient()
+    try:
+        response = ntpClient.request(ntpServer, version=3)
+        currentTime = ctime(response.tx_time)
+        print(f'NTP Time: {currentTime}')
+
+        os.system(f'sudo date {currentTime}')
+        print(f'systemtime sync\'d to ntp server')
+    except Exception as e:
+        print(f'failed to sync time: {e}')
+
 def main():
 
     args = get_args()
     
     clientID = get_mac_address()
 
+    sync_ntp_time(args.server)
    
     conn = init_connection(args.server,args.port)
     
@@ -87,6 +120,18 @@ def main():
     networkStrength = {clientID:0}
 
     environmentBaselineTimer = 0
+    
+    #sniffing interface channel parameters
+    ####
+    channels = [1,6,11]
+    channelHopInterval = 0.5 
+    ####
+    #start sync'd channel hopping in separate thread
+    synchronized_start()
+    hopperThread = threading.Thread(target=channel_hopper, args=(args.interface, channels, channelHopInterval))
+    hopperThread.deamon = True
+    hopperThread.start()
+
     while True:
         try:
             sniff(iface=args.interface, prn=handle_packet, timeout=0.01)
@@ -120,7 +165,6 @@ def main():
 
             # send sniffed data to server and remove from queue
             for data in send_buffer:
-                print(f'sending{data}')
                 conn.send(data.encode())
                 send_buffer.remove(data)
             
@@ -134,7 +178,7 @@ def main():
             if environmentBaselineTimer >= 1000:
                 environmentBaselineTimer = 0
                 frame = create_ping_request()
-                print("broadcast sending")
+                print("broadcasting probe")
                 sendp(frame, iface=args.interface, verbose=False)
 
         except KeyboardInterrupt:
