@@ -43,6 +43,7 @@ def handle_packet(pkt):
         # print(pkt)
         data = (f'{mac_addr}|{rssi}|{pkt.time}')
         for key, value in networkStrength.items():
+            print(f'checking {mac_addr} against listed {key}')
             if mac_addr == key.upper():
                 networkStrength[key] = rssi
                 print(f'updated {key} to {rssi}')
@@ -105,8 +106,11 @@ def main():
     
     clientID = get_mac_address()
 
+    #Force sync to ntp server
+    ####
     sync_ntp_time(args.server)
-   
+    ####
+
     conn = init_connection(args.server,args.port)
     
     initMsg = f'init|{clientID}|{args.location}'
@@ -143,6 +147,7 @@ def main():
                 if not msg:
                     print('Server connection closed')
                     conn.close()
+                    hopperThread.exit()
                     exit()
                 else:
                     data = msg.decode()
