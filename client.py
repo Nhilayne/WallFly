@@ -86,6 +86,7 @@ def channel_hopper(interface, channels, interval):
     while True:
         for channel in channels:
             subprocess.call(['iwconfig',interface,'channel',str(channel)])
+            print(f'interface {interface} switching to channel {str(channel)}')
             time.sleep(interval)
 
 def sync_ntp_time(ntpServer='192.168.4.1'):
@@ -147,7 +148,7 @@ def main():
                 if not msg:
                     print('Server connection closed')
                     conn.close()
-                    hopperThread.exit()
+                    hopperThread.join()
                     exit()
                 else:
                     data = msg.decode()
