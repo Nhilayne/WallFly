@@ -1,0 +1,5 @@
+systemctl stop NetworkManager
+wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf
+systemctl restart chrony
+dhclient wlan0
+sudo airmon-ng start wlan1
