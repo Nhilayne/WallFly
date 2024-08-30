@@ -33,7 +33,7 @@ def get_mac_address():
     id_formatted = ':'.join(('%012x'%id)[i:i+2] for i in range(1,12,2))
     return id_formatted.lower()
 
-def handle_packet(pkt):
+def parse_packet(pkt):
     if not pkt.haslayer(Dot11):
         return None
     if pkt.type == 0 and pkt.subtype == 4:
@@ -51,20 +51,21 @@ def handle_packet(pkt):
                 return
             data += (f'|{value}')
         # print(data)
-        send_buffer.append(data)
+        return data
 
-def create_probe_request(interface, ssid):
+def create_probe_request(ssid, id):
     # Generate a random MAC address for the source (optional)
-    src_mac = ':'.join([f'{random.randint(0x00, 0xFF):02x}' for _ in range(6)])
+    # src_mac = ':'.join([f'{random.randint(0x00, 0xFF):02x}' for _ in range(6)])
+    srcMAC = id
 
     # Probe request frame creation
     probe_request = RadioTap() / \
-                    Dot11(type=0, subtype=4, addr1="ff:ff:ff:ff:ff:ff", addr2=src_mac, addr3="ff:ff:ff:ff:ff:ff") / \
+                    Dot11(type=0, subtype=4, addr1="ff:ff:ff:ff:ff:ff", addr2=srcMAC, addr3="ff:ff:ff:ff:ff:ff") / \
                     Dot11ProbeReq() / \
-                    Dot11Elt(ID="SSID", info=ssid) / \
-                    Dot11Elt(ID="Rates", info=b'\x02\x04\x0b\x16') / \
-                    Dot11Elt(ID="DSset", info=chr(1)) / \
-                    Dot11Elt(ID="Extended Rates", info=b'\x0c\x12\x18\x24')
+                    Dot11Elt(ID=0, info=ssid) / \
+                    Dot11Elt(ID=1, info=b'\x02\x04\x0b\x16') / \
+                    Dot11Elt(ID=3, info=chr(1)) / \
+                    Dot11Elt(ID=50, info=b'\x0c\x12\x18\x24')
 
     # Send the probe request
     # sendp(probe_request, iface=interface, count=1, inter=0.1, verbose=1)
@@ -74,7 +75,7 @@ def create_probe_request(interface, ssid):
 def close():
     pass
 
-#
+#channel sync
 ####
 def synchronized_start():
     currentTime = datetime.datetime.now()
@@ -104,6 +105,15 @@ def sync_ntp_time(ntpServer='192.168.4.1'):
     except Exception as e:
         print(f'failed to sync time: {e}')
 
+#sniffing
+####
+def capture_packets(interface, queue):
+    def packet_handler(packet):
+        queue.put(packet)
+    
+    sniff(iface=interface, prn=packet_handler, timeout=None)
+
+
 def main():
 
     args = get_args()
@@ -122,7 +132,7 @@ def main():
     conn.send(initMsg.encode())
 
     global send_buffer
-    send_buffer = []
+    send_buffer = queue.Queue()
 
     global networkStrength
     networkStrength = {clientID:0}
@@ -149,10 +159,15 @@ def main():
         hopperThread = threading.Thread(target=channel_hopper, args=(args.interface, channels, channelHopInterval))
         hopperThread.deamon = True
         hopperThread.start()
+
+    sniffingThread = threading.Thread(target=capture_packets, args=(args.interface, send_buffer))
+    sniffingThread.daemon = True
+    sniffingThread.start()
+
     print('starting')
     while True:
         try:
-            sniff(iface=args.interface, prn=handle_packet, timeout=0.01)
+            # sniff(iface=args.interface, prn=handle_packet, timeout=0.01)
             readSockets,_,_ = select.select([conn],[],[],0)
             
             # check for server messages
@@ -182,9 +197,11 @@ def main():
                         # networkStrength[data[1]] = 0
 
             # send sniffed data to server and remove from queue
-            for data in send_buffer:
-                conn.send(data.encode())
-                send_buffer.remove(data)
+            while not send_buffer.empty():
+                pkt = send_buffer.get()
+                data = parse_packet(pkt)
+                if data:
+                    conn.send(data.encode())
             
             # broadcast ping request for other clients to sniff ~10x per second.
             ##########
@@ -195,7 +212,7 @@ def main():
             environmentBaselineTimer += 1
             if environmentBaselineTimer >= 1000:
                 environmentBaselineTimer = 0
-                frame = create_probe_request()
+                frame = create_probe_request('WallFly', clientID)
                 print("broadcasting probe")
                 # sendp(frame, iface=interface, count=1, inter=0.1, verbose=0)
                 sendp(frame, iface=args.interface, verbose=False)
