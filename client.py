@@ -4,7 +4,7 @@ import select
 import math
 import time
 import struct
-from scapy.all import sniff, Dot11, Dot11Beacon, Dot11Elt, RadioTap, RandMAC, sendp
+from scapy.all import *
 import uuid
 import threading
 import subprocess
@@ -53,25 +53,23 @@ def handle_packet(pkt):
         # print(data)
         send_buffer.append(data)
 
-def create_ping_request():
-    # Crafting a Dot11 packet
-    dot11 = Dot11(type=0, subtype=8, addr1='ff:ff:ff:ff:ff:ff', addr2=RandMAC(), addr3=RandMAC())
-    beacon = Dot11Beacon(cap='ESS+privacy')
-    essid = Dot11Elt(ID='SSID', info='TestNetwork', len=10)
-    rsn = Dot11Elt(ID='RSNinfo', info=(
-        '\x01\x00'                 # RSN Version 1
-        '\x00\x0f\xac\x02'         # Group Cipher Suite (TKIP)
-        '\x02\x00'                 # 2 Pairwise Cipher Suites (unicast)
-        '\x00\x0f\xac\x04'         # AES Cipher
-        '\x00\x0f\xac\x02'         # TKIP Cipher
-        '\x01\x00'                 # 1 Authentication Key Management Suite (802.1X)
-        '\x00\x0f\xac\x02'         # Pre-Shared Key
-        '\x00\x00'))               # RSN Capabilities (no extra capabilities)
+def create_probe_request(interface, ssid):
+    # Generate a random MAC address for the source (optional)
+    src_mac = ':'.join([f'{random.randint(0x00, 0xFF):02x}' for _ in range(6)])
 
-    # Combine the Dot11, Beacon, and SSID elements
-    frame = RadioTap()/dot11/beacon/essid/rsn
+    # Probe request frame creation
+    probe_request = RadioTap() / \
+                    Dot11(type=0, subtype=4, addr1="ff:ff:ff:ff:ff:ff", addr2=src_mac, addr3="ff:ff:ff:ff:ff:ff") / \
+                    Dot11ProbeReq() / \
+                    Dot11Elt(ID="SSID", info=ssid) / \
+                    Dot11Elt(ID="Rates", info=b'\x02\x04\x0b\x16') / \
+                    Dot11Elt(ID="DSset", info=chr(1)) / \
+                    Dot11Elt(ID="Extended Rates", info=b'\x0c\x12\x18\x24')
 
-    return frame
+    # Send the probe request
+    # sendp(probe_request, iface=interface, count=1, inter=0.1, verbose=1)
+
+    return probe_request
 
 def close():
     pass
@@ -135,7 +133,7 @@ def main():
 
     #sniffing interface channel parameters
     ####
-    channels = args.channel.split(',')
+    channels = args.channels.split(',')
     channelHopInterval = 0.5 
     ####
     #start sync'd channel hopping in separate thread if multiple
@@ -197,8 +195,9 @@ def main():
             environmentBaselineTimer += 1
             if environmentBaselineTimer >= 1000:
                 environmentBaselineTimer = 0
-                frame = create_ping_request()
+                frame = create_probe_request()
                 print("broadcasting probe")
+                # sendp(frame, iface=interface, count=1, inter=0.1, verbose=0)
                 sendp(frame, iface=args.interface, verbose=False)
 
         except KeyboardInterrupt:

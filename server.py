@@ -119,7 +119,7 @@ def main():
                             print(f'client: {ip}:{port}')
                 case(2):
                     for connection in connections:
-                        connection.send("s").encode
+                        connection.send("s".encode())
                 case(3):
                     #show recent data
                     print(inputSet.tail(6))
