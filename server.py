@@ -91,9 +91,9 @@ def main():
     ###############################
 
     print(f'\n\nSelect an action:')
-    print(f'1: Display Current Connections \t 4: Disconnect Clients')
-    print(f'2: Distribute Client List \t 5: Exit')
-    print(f'3: Display Buffer Tail')
+    print(f'1: Display Current Connections \t 4: Distribute Client List')
+    print(f'2: Start Connected Sniffers \t 5: Disconnect Clients')
+    print(f'3: Display Buffer Tail \t 6: Exit')
     while True:
         try:        
             readSockets,_,_ = select.select(connections,[],[],0)
@@ -118,6 +118,12 @@ def main():
                             ip,port = connection.getpeername()
                             print(f'client: {ip}:{port}')
                 case(2):
+                    for connection in connections:
+                        connection.send("s").encode
+                case(3):
+                    #show recent data
+                    print(inputSet.tail(6))
+                case(4):
                     #send mac list to all connected clients
                     for connection in connections:
                         if connection != server or db:
@@ -125,11 +131,7 @@ def main():
                             for key, value in networkPositions.items():
                                 print(f'sending {key}{value} to {ip}:{port}')
                                 connection.sendall(f'update|{key}|{value}'.encode())
-
-                case(3):
-                    #show current data
-                    print(inputSet.tail(6))
-                case(4):
+                case(5):
                     #disconnect clients
                     tempConnections = []
                     for connection in connections:
@@ -140,7 +142,7 @@ def main():
                             tempConnections.append(connection)
                     connections.clear()
                     connections = tempConnections
-                case(5):
+                case(6):
                     #close out app
                     exit()
                     

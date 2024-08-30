@@ -20,6 +20,7 @@ def get_args():
     parser.add_argument("--server", "-s", help="Processing Server IP")
     parser.add_argument("--port", "-p", default=8505, help="Processing Server Port")
     parser.add_argument("--location", "-l", default="0,0,0", help="")
+    parser.add_argument("--channels","-c", default="1,6,11", help="Wireless channels to monitor")
     return parser.parse_args()
 
 def init_connection(server, port):
@@ -44,7 +45,7 @@ def handle_packet(pkt):
         data = (f'{mac_addr}|{rssi}|{pkt.time}')
         for key, value in networkStrength.items():
             print(f'checking {mac_addr} against listed {key}')
-            if mac_addr == key.upper():
+            if mac_addr.upper() == key.upper():
                 networkStrength[key] = rssi
                 print(f'updated {key} to {rssi}')
                 return
@@ -83,11 +84,15 @@ def synchronized_start():
     time.sleep(timeToWait)
 
 def channel_hopper(interface, channels, interval):
+    print(f'interface {interface} hopping channels {channels} every {interval} seconds')
     while True:
         for channel in channels:
-            subprocess.call(['iwconfig',interface,'channel',str(channel)])
-            print(f'interface {interface} switching to channel {str(channel)}')
+            subprocess.call(['iwconfig',interface,'channel',channel])
             time.sleep(interval)
+
+def channel_set(interface, channel):
+    subprocess.call(['iwconfig',interface,'channel',channel])
+    print(f'interface {interface} set to channel {channel}')
 
 def sync_ntp_time(ntpServer='192.168.4.1'):
     ntpClient = ntplib.NTPClient()
@@ -126,17 +131,27 @@ def main():
 
     environmentBaselineTimer = 0
     
+    
+
     #sniffing interface channel parameters
     ####
-    channels = [1,6,11]
+    channels = args.channel.split(',')
     channelHopInterval = 0.5 
     ####
-    #start sync'd channel hopping in separate thread
+    #start sync'd channel hopping in separate thread if multiple
+    #wait for server start signal
+    print('Waiting for server start signal')
+    conn.recv(1024)
+    print('syncing Start')
     synchronized_start()
-    hopperThread = threading.Thread(target=channel_hopper, args=(args.interface, channels, channelHopInterval))
-    hopperThread.deamon = True
-    hopperThread.start()
-
+    
+    if len(channels) == 1:
+        channel_set(args.interface, channels[0])
+    else:
+        hopperThread = threading.Thread(target=channel_hopper, args=(args.interface, channels, channelHopInterval))
+        hopperThread.deamon = True
+        hopperThread.start()
+    print('starting')
     while True:
         try:
             sniff(iface=args.interface, prn=handle_packet, timeout=0.01)
@@ -148,7 +163,6 @@ def main():
                 if not msg:
                     print('Server connection closed')
                     conn.close()
-                    hopperThread.join()
                     exit()
                 else:
                     data = msg.decode()
