@@ -179,15 +179,19 @@ def main():
                     exit()
                 else:
                     data = msg.decode()
-                    print(f'recvd {data}')
+                    if 'update' not in data:
+                        continue
+                    # print(f'recvd {data}')
                     data = data.split('update')
                     for msg in data:
                         if msg =='':
                             continue
-                        print(msg)
+                        # print(msg)
                         msg = msg.split('|')
-                        print(msg[1])
+                        print(f'adding {msg[1]} to known network clients')
                         networkStrength[msg[1]] = 0
+                    frame = create_probe_request('WallFly', clientID)
+                    sendp(frame, iface=args.interface, verbose=False)
                     # if data[0] == 'update':
                         # position = tuple(float(x) for x in data[2][1:-1].split(','))
                         # print(f'testing::{position[0]}+{position[1]}+{position[2]}')

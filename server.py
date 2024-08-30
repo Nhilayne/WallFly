@@ -34,7 +34,7 @@ def connect_db(dbAddress, dbPort):
 
 def get_mac_address():
     id = uuid.getnode()
-    id_formatted = ':'.join(('%012x'%id)[i:i+2] for i in range(1,12,2))
+    id_formatted = ':'.join(('%012x'%id)[i:i+2] for i in range(0,12,2))
     return id_formatted.lower()
 
 def init_data_defaults(serverMac):
@@ -91,9 +91,9 @@ def main():
     ###############################
 
     print(f'\n\nSelect an action:')
-    print(f'1: Display Current Connections \t 4: Distribute Client List')
+    print(f'1: Display Current Connections \t 4: Display Buffer Tail')
     print(f'2: Start Connected Sniffers \t 5: Disconnect Clients')
-    print(f'3: Display Buffer Tail \t 6: Exit')
+    print(f'3: Distribute Client List \t 6: Exit')
     while True:
         try:        
             readSockets,_,_ = select.select(connections,[],[],0)
@@ -119,24 +119,25 @@ def main():
                             print(f'client: {ip}:{port}')
                 case(2):
                     for connection in connections:
-                        connection.send("s".encode())
+                        if connection != server or db:
+                            connection.send('start'.encode())
                 case(3):
-                    #show recent data
-                    print(inputSet.tail(6))
-                case(4):
                     #send mac list to all connected clients
                     for connection in connections:
                         if connection != server or db:
                             ip,port = connection.getpeername()
                             for key, value in networkPositions.items():
-                                print(f'sending {key}{value} to {ip}:{port}')
+                                # print(f'sending {key}{value} to {ip}:{port}')
                                 connection.sendall(f'update|{key}|{value}'.encode())
+                case(4):
+                    #show recent data
+                    print(inputSet.tail(6))
                 case(5):
                     #disconnect clients
                     tempConnections = []
                     for connection in connections:
                         if connection != server or db:
-                            print(f'closing {connection}')
+                            # print(f'closing {connection}')
                             connection.close()
                         else:
                             tempConnections.append(connection)
@@ -179,9 +180,10 @@ def main():
 
 
         except KeyboardInterrupt:
+            print(f'Force close detected, shutting down gracefully')
             server.close()
-            print(inputSet.head(10))
-            print(networkPositions.keys)
+            # print(inputSet.head(10))
+            # print(networkPositions.keys)
             exit()
 
 
