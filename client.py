@@ -30,7 +30,7 @@ def init_connection(server, port):
 
 def get_mac_address():
     id = uuid.getnode()
-    id_formatted = ':'.join(('%012x'%id)[i:i+2] for i in range(1,12,2))
+    id_formatted = ':'.join(('%012x'%id)[i:i+2] for i in range(0,12,2))
     return id_formatted.lower()
 
 def parse_packet(pkt):
@@ -44,7 +44,7 @@ def parse_packet(pkt):
         # print(pkt)
         data = (f'{mac_addr}|{rssi}|{pkt.time}')
         for key, value in networkStrength.items():
-            print(f'checking {mac_addr} against listed {key}')
+            # print(f'checking {mac_addr} against listed {key}')
             if mac_addr.upper() == key.upper():
                 networkStrength[key] = rssi
                 print(f'updated {key} to {rssi}')
@@ -100,7 +100,7 @@ def sync_ntp_time(ntpServer='192.168.4.1'):
         currentTime = ctime(response.tx_time)
         print(f'NTP Time: {currentTime}')
 
-        os.system(f'sudo date {currentTime}')
+        os.system(f'sudo chronyc makestep')
         print(f'systemtime sync\'d to ntp server')
     except Exception as e:
         print(f'failed to sync time: {e}')
@@ -210,7 +210,7 @@ def main():
             # and relayed to server to assist with processing.
             ##########
             environmentBaselineTimer += 1
-            if environmentBaselineTimer >= 1000:
+            if environmentBaselineTimer >= 10000000:
                 environmentBaselineTimer = 0
                 frame = create_probe_request('WallFly', clientID)
                 print("broadcasting probe")
