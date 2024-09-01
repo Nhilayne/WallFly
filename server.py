@@ -7,6 +7,7 @@ import hashlib
 from multiprocessing import pool
 import pandas as pd
 import uuid 
+from collections import defaultdict
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -59,13 +60,45 @@ def menu(cmd):
 
     return choice
 
-def read_sockets():
-   pass
-
 def privatize(mac):
     hashed = hashlib.sha256(mac.encode(), usedforsecurity=True).hexdigest()
     # print(f'hashed mac:{hashed}')
     return hashed    
+
+
+#Data odering and pass-off
+####
+
+def order_data(mac_address, client_id, packet_data):
+    current_time = time.time()
+    
+    # Add or update packet data with timestamp for the specific client
+    packets[mac_address][client_id] = (packet_data, current_time)
+
+    # Check if we have received packets from 3 unique clients for this MAC address
+    if len(packets[mac_address]) == 3:
+        process_packets(packets.pop(mac_address))
+
+    # After adding the packet, check and clean up old groups
+    cleanup_old_groups(current_time)
+
+def process_packets(packet_group):
+    # Package the three packets and send them for further processing
+    print(f"Processing packet group: {packet_group}")
+
+def cleanup_old_groups(current_time):
+    to_remove = []
+    for mac_address, client_packets in packets.items():
+        # Get the timestamp of the oldest packet in the group
+        oldest_timestamp = min(data[1] for data in client_packets.values())
+        
+        if current_time - oldest_timestamp > 5:
+            to_remove.append(mac_address)
+
+    for mac_address in to_remove:
+        print(f"Removing stale packets for MAC: {mac_address}")
+        del packets[mac_address]
+
 
 def main():
 
@@ -80,6 +113,11 @@ def main():
     serverID = get_mac_address()
 
     networkPositions, inputSet = init_data_defaults(serverID)
+
+    global packets
+    packets = defaultdict(dict)  # For storing packets by MAC and client
+    global AGE_LIMIT
+    AGE_LIMIT = 10  # seconds
 
     ###############################
     # # calc distance between server and a client node
@@ -103,7 +141,6 @@ def main():
             if userInput:
                 input = menu(sys.stdin.readline().strip())
 
-            # newLocationData = read_sockets(readSockets)
             match(input):
                 case(1):
                     #display all active connections
@@ -165,14 +202,16 @@ def main():
                             networkPositions[data[1]] = convertedPosition
                             continue
                         # data.append(address[0])
+
                         ip, _ = connection.getpeername()
                         print(f'{ip} sent {data}')
                         hashed_mac = privatize(data[0])
                         rssi = data[1]
                         timestamp = data[2]
-                        src = ip
-                        row = pd.DataFrame({'mac':[hashed_mac], 'rssi':[rssi], 'time':[timestamp], 'ip':[src]})
-                        inputSet = pd.concat([inputSet,row], ignore_index=True)
+                        # src = ip
+                        order_data(hashed_mac, ip, (rssi, timestamp))
+                        # row = pd.DataFrame({'mac':[hashed_mac], 'rssi':[rssi], 'time':[timestamp], 'ip':[src]})
+                        # inputSet = pd.concat([inputSet,row], ignore_index=True)
             pass
             # process_set = getNext(input_set)
             # location = calcPosition(process_set)

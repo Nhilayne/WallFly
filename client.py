@@ -135,7 +135,7 @@ def main():
     send_buffer = queue.Queue()
 
     global networkStrength
-    networkStrength = {clientID:0}
+    networkStrength = {}
 
     environmentBaselineTimer = 0
     
@@ -205,7 +205,7 @@ def main():
                 pkt = send_buffer.get()
                 data = parse_packet(pkt)
                 if data:
-                    conn.send(data.encode())
+                    conn.sendall(data.encode())
             
             # broadcast ping request for other clients to sniff ~10x per second.
             ##########
