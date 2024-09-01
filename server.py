@@ -77,14 +77,14 @@ def order_data(mac_address, client_id, packet_data):
 
     # Check if we have received packets from 3 unique clients for this MAC address
     if len(packets[mac_address]) == 3:
-        process_packets(packets.pop(mac_address))
+        process_packets(mac_address, packets.pop(mac_address))
 
     # After adding the packet, check and clean up old groups
     cleanup_old_groups(current_time)
 
-def process_packets(packet_group):
+def process_packets(mac, packet_group):
     # Package the three packets and send them for further processing
-    print(f"Processing packet group: {packet_group}")
+    print(f"Created packet group for {mac}: {packet_group}")
 
 def cleanup_old_groups(current_time):
     to_remove = []
@@ -204,7 +204,7 @@ def main():
                         # data.append(address[0])
 
                         ip, _ = connection.getpeername()
-                        print(f'{ip} sent {data}')
+                        # print(f'{ip} sent {data}')
                         hashed_mac = privatize(data[0])
                         rssi = data[1]
                         timestamp = data[2]
