@@ -2,6 +2,7 @@ import sys
 import socket
 import argparse
 import time
+import math
 import select
 import hashlib
 from multiprocessing import pool
@@ -84,7 +85,8 @@ def order_data(mac_address, client_id, packet_data):
 
 def process_packets(mac, packet_group):
     # Package the three packets and send them for further processing
-    print(f"Created packet group for {mac}: {packet_group}")
+    # print(f"Created packet group for {mac}: {packet_group}")
+    print(f"Created packet group for {mac}")
 
 def cleanup_old_groups(current_time):
     to_remove = []
@@ -200,6 +202,9 @@ def main():
                         if data[0] == 'init':
                             convertedPosition = tuple(float(x) for x in data[2].split(','))
                             networkPositions[data[1]] = convertedPosition
+                            print(f'testing::{convertedPosition[0]}+{convertedPosition[1]}+{convertedPosition[2]}')
+                            convertedDistance = round(math.sqrt(convertedPosition[0]**2+convertedPosition[1]**2+convertedPosition[2]**2),3)
+                            print(f'abs dist: {convertedDistance}')
                             continue
                         # data.append(address[0])
 
