@@ -200,6 +200,8 @@ def main():
                         msg=msg.decode()
                         data = msg.split('|')
                         if data[0] == 'init':
+                            data[2] = data[2].strip('[')
+                            data[2] = data[2].strip(']')
                             convertedPosition = tuple(float(x) for x in data[2].split(','))
                             networkPositions[data[1]] = convertedPosition
                             # print(f'testing::{convertedPosition[0]}+{convertedPosition[1]}+{convertedPosition[2]}')
@@ -210,7 +212,7 @@ def main():
                         # data.append(address[0])
 
                         ip, _ = connection.getpeername()
-                        # print(f'{ip} sent {data}')
+                        print(f'{ip} sent {data}')
                         hashed_mac = privatize(data[0])
                         rssi = data[1]
                         timestamp = data[2]

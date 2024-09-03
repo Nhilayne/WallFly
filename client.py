@@ -33,12 +33,14 @@ def get_mac_address():
     id_formatted = ':'.join(('%012x'%id)[i:i+2] for i in range(0,12,2))
     return id_formatted.lower()
 
-def get_distance_to_client(clientPosition, localPosition):
-    distance=[]
-    zeroDistance = round(math.sqrt(clientPosition[0]**2 + clientPosition[1]**2 + clientPosition[2]**2),3)
-    distance[0] = zeroDistance[0] - localPosition[0]
-    distance[1] = zeroDistance[1] - localPosition[1]
-    distance[2] = zeroDistance[2] - localPosition[2]
+def get_distance_to_client(remotePosition, localPosition):
+    print(remotePosition)
+    print(localPosition)
+    position = [0,0,0]
+    position[0] = remotePosition[0] - localPosition[0]
+    position[1] = remotePosition[1] - localPosition[1]
+    position[2] = remotePosition[2] - localPosition[2]
+    distance = round(math.sqrt(position[0]**2 + position[1]**2 + position[2]**2),3)
     return distance
 
 def parse_packet(pkt):
@@ -57,6 +59,7 @@ def parse_packet(pkt):
                 temp = networkStrength[key][1]
                 networkStrength[key][1] = rssi
                 print(f'updated {key} from {temp} to {networkStrength[key][1]}')
+                print(f'result:{networkStrength}')
                 return
             data += (f'|{value}')
         # print(data)
@@ -199,20 +202,22 @@ def main():
                         # print(msg)
                         msg = msg.split('|')
                         print(f'adding {msg[1]} to known network clients')
-                        
+                        msg[2] = msg[2].strip('(')
+                        msg[2] = msg[2].strip(')')
+                        msg[2] = msg[2].split(',')
+                        remoteLocation = [float(x) for x in msg[2]]
+                        location = args.location.strip('[')
+                        location = location.strip(']')
+                        location = location.split(',')
+                        location = [float(x) for x in location]
+                        #print(args.location)
                         print(f'vector for {msg[1]}: {msg[2]}')
-                        relativeDistance = get_distance_to_client(msg[2], args.location)
+                        relativeDistance = get_distance_to_client(remoteLocation, location)
                         print(f'distance between local and remote: {relativeDistance}')
                         networkStrength[msg[1]] = [relativeDistance, 0]
                     frame = create_probe_request('WallFly', clientID)
                     sendp(frame, iface=args.interface, verbose=False)
-                    # if data[0] == 'update':
-                        # position = tuple(float(x) for x in data[2][1:-1].split(','))
-                        # print(f'testing::{position[0]}+{position[1]}+{position[2]}')
-                        # convertedDistance = round(math.sqrt(position[0]**2+position[1]**2+position[2]**2),3)
-                        # print(f'abs dist: {convertedDistance}')
-                        # print(data[1])
-                        # networkStrength[data[1]] = 0
+                    
 
             # send sniffed data to server and remove from queue
             while not send_buffer.empty():
