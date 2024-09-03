@@ -27,8 +27,9 @@ def packet_handler(pkt):
         # print(f'checking {mac_addr} against listed {key}')
         if mac_addr.upper() == mac.upper():
             data = (f'{mac_addr}|{rssi}|{distance}')
-            new_row = {'mac': mac_addr, 'rssi': rssi, 'distance': distance}
-            df = df.append(new_row, ignore_index=True)
+            new_row = pd.DataFrame({'mac': [mac_addr], 'rssi': [rssi], 'distance': [distance]})
+            global df
+            df = pd.concat([df,new_row], ignore_index=True)
             
 
 def main():
@@ -45,14 +46,15 @@ def main():
     columns = ['mac', 'rssi', 'distance']
     global df
     df = pd.DataFrame(columns=columns)
-    inputSet = pd.concat([inputSet,row], ignore_index=True)
+    # inputSet = pd.concat([inputSet,row], ignore_index=True)
 
     while True:
         try:
-            sniff(iface=args.interface, prn=packet_handler, timeout=0.5)
+            sniff(iface=args.interface, prn=packet_handler, timeout=0.1)
 
         except KeyboardInterrupt:
-            df.to_csv('rssi-distance,csv', index=False)
+            print('outputting csv')
+            df.to_csv('rssi-distance.csv', index=False)
             exit()
 
 if __name__=='__main__':
