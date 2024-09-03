@@ -33,6 +33,14 @@ def get_mac_address():
     id_formatted = ':'.join(('%012x'%id)[i:i+2] for i in range(0,12,2))
     return id_formatted.lower()
 
+def get_distance_to_client(clientPosition, localPosition):
+    distance=[]
+    zeroDistance = round(math.sqrt(clientPosition[0]**2 + clientPosition[1]**2 + clientPosition[2]**2),3)
+    distance[0] = zeroDistance[0] - localPosition[0]
+    distance[1] = zeroDistance[1] - localPosition[1]
+    distance[2] = zeroDistance[2] - localPosition[2]
+    return distance
+
 def parse_packet(pkt):
     if not pkt.haslayer(Dot11):
         return None
@@ -46,8 +54,9 @@ def parse_packet(pkt):
         for key, value in networkStrength.items():
             # print(f'checking {mac_addr} against listed {key}')
             if mac_addr.upper() == key.upper():
-                networkStrength[key] = rssi
-                print(f'updated {key} to {rssi}')
+                temp = networkStrength[key][1]
+                networkStrength[key][1] = rssi
+                print(f'updated {key} from {temp} to {networkStrength[key][1]}')
                 return
             data += (f'|{value}')
         # print(data)
@@ -134,6 +143,7 @@ def main():
     global send_buffer
     send_buffer = queue.Queue()
 
+    #interior stored as [distance, rssi]
     global networkStrength
     networkStrength = {}
 
@@ -189,8 +199,11 @@ def main():
                         # print(msg)
                         msg = msg.split('|')
                         print(f'adding {msg[1]} to known network clients')
-                        networkStrength[msg[1]] = 0
+                        
                         print(f'vector for {msg[1]}: {msg[2]}')
+                        relativeDistance = get_distance_to_client(msg[2], args.location)
+                        print(f'distance between local and remote: {relativeDistance}')
+                        networkStrength[msg[1]] = [relativeDistance, 0]
                     frame = create_probe_request('WallFly', clientID)
                     sendp(frame, iface=args.interface, verbose=False)
                     # if data[0] == 'update':

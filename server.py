@@ -201,11 +201,11 @@ def main():
                         data = msg.split('|')
                         if data[0] == 'init':
                             convertedPosition = tuple(float(x) for x in data[2].split(','))
-                            
-                            print(f'testing::{convertedPosition[0]}+{convertedPosition[1]}+{convertedPosition[2]}')
-                            convertedDistance = round(math.sqrt(convertedPosition[0]**2+convertedPosition[1]**2+convertedPosition[2]**2),3)
-                            print(f'abs dist: {convertedDistance}')
                             networkPositions[data[1]] = convertedPosition
+                            # print(f'testing::{convertedPosition[0]}+{convertedPosition[1]}+{convertedPosition[2]}')
+                            # convertedDistance = round(math.sqrt(convertedPosition[0]**2+convertedPosition[1]**2+convertedPosition[2]**2),3)
+                            # print(f'abs dist: {convertedDistance}')
+                            
                             continue
                         # data.append(address[0])
 
