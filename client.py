@@ -190,6 +190,7 @@ def main():
                         msg = msg.split('|')
                         print(f'adding {msg[1]} to known network clients')
                         networkStrength[msg[1]] = 0
+                        print(f'vector for {msg[1]}: {msg[2]}')
                     frame = create_probe_request('WallFly', clientID)
                     sendp(frame, iface=args.interface, verbose=False)
                     # if data[0] == 'update':

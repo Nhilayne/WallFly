@@ -166,7 +166,7 @@ def main():
                         if connection != server or db:
                             ip,port = connection.getpeername()
                             for key, value in networkPositions.items():
-                                # print(f'sending {key}{value} to {ip}:{port}')
+                                print(f'sending {key}|{value} to {ip}:{port}')
                                 connection.sendall(f'update|{key}|{value}'.encode())
                 case(4):
                     #show recent data
@@ -201,10 +201,11 @@ def main():
                         data = msg.split('|')
                         if data[0] == 'init':
                             convertedPosition = tuple(float(x) for x in data[2].split(','))
-                            networkPositions[data[1]] = convertedPosition
+                            
                             print(f'testing::{convertedPosition[0]}+{convertedPosition[1]}+{convertedPosition[2]}')
                             convertedDistance = round(math.sqrt(convertedPosition[0]**2+convertedPosition[1]**2+convertedPosition[2]**2),3)
                             print(f'abs dist: {convertedDistance}')
+                            networkPositions[data[1]] = convertedPosition
                             continue
                         # data.append(address[0])
 
