@@ -1,68 +1,54 @@
-import socket
+from scapy.all import *
+from scapy.layers.dot11 import Dot11, RadioTap
 import struct
-import os
+import signal
+import sys
 
-# Replace with your known IP address
-KNOWN_IP = "192.168.4.16"  # Example IP address
+KNOWN_IP = "192.168.4.4"  # Replace with the actual known IP
+iface = "wlan1"  # Your interface must be in monitor mode
 
-# Initialize variables to store RSSI values and count
+# List to store captured RSSI values
 rssi_values = []
-packet_count = 0
 
-def get_rssi_from_packet(packet):
-    # Extract RSSI from packet (needs specific implementation based on your environment)
-    # Placeholder implementation; adjust according to your setup
-    return -50  # Example RSSI value; replace with actual extraction logic
+def get_rssi(packet):
+    """Extract RSSI from Radiotap header"""
+    if packet.haslayer(RadioTap):
+        rssi = -(256 - ord(packet.notdecoded[-4:-3]))  # Extract RSSI from the Radiotap layer
+        return rssi
+    return None
 
 def process_packet(packet):
-    global rssi_values, packet_count
-    
-    # Unpack IP header
-    ip_header = packet[:20]
-    iph = struct.unpack('!BBHHHBBH4s4s', ip_header)
-    protocol = iph[6]
-    src_ip = socket.inet_ntoa(iph[8])
-    
-    # Check if the packet is ICMP and from the known IP
-    if protocol == 1:  # ICMP
-        # Extract ICMP header (start after IP header)
-        icmp_header = packet[20:28]
-        icmp_type, = struct.unpack('!BB', icmp_header[:2])
+    """Process each packet to filter ICMP Echo Requests and capture RSSI"""
+    if packet.haslayer(IP) and packet.haslayer(ICMP):
+        ip_layer = packet.getlayer(IP)
+        icmp_layer = packet.getlayer(ICMP)
         
-        if icmp_type == 8 and src_ip == KNOWN_IP:  # Type 8 is Echo Request
-            # Extract RSSI
-            rssi = get_rssi_from_packet(packet)
-            rssi_values.append(rssi)
-            packet_count += 1
+        # Check if it's an ICMP Echo Request (ping)
+        if icmp_layer.type == 8 and ip_layer.src == KNOWN_IP:
+            rssi = get_rssi(packet)
+            if rssi is not None:
+                print(f"ICMP Echo Request from {ip_layer.src} | RSSI: {rssi} dBm")
+                rssi_values.append(rssi)
+            else:
+                print(f"ICMP Echo Request from {ip_layer.src} | RSSI: Not available")
 
-def main():
-    global rssi_values, packet_count
-    
-    # Create a raw socket to capture ICMP packets
-    try:
-        raw_socket = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)
-    except PermissionError:
-        print("Permission denied. You need to run this script with root privileges.")
-        return
-    
-    # Bind the socket to all interfaces
-    raw_socket.bind(('0.0.0.0', 0))
-    
-    print("Starting packet sniffing. Press Ctrl+C to stop.")
-    
-    try:
-        while True:
-            packet = raw_socket.recvfrom(65565)[0]  # Receive packets
-            process_packet(packet)
-    except KeyboardInterrupt:
-        print("Stopping packet sniffing.")
-    
-    # Calculate and display average RSSI
-    if packet_count > 0:
+def calculate_average_rssi():
+    """Calculate and display the average RSSI when the program is terminated"""
+    if rssi_values:
         average_rssi = sum(rssi_values) / len(rssi_values)
-        print(f"Average RSSI from {KNOWN_IP}: {average_rssi} dBm")
+        print(f"\nAverage RSSI: {average_rssi:.2f} dBm")
     else:
-        print(f"No ICMP Echo Requests found from {KNOWN_IP}")
+        print("\nNo RSSI values captured.")
 
-if __name__ == "__main__":
-    main()
+def signal_handler(sig, frame):
+    """Handle program termination and display average RSSI"""
+    print("\nTerminating program...")
+    calculate_average_rssi()
+    sys.exit(0)
+
+# Attach the signal handler to handle Ctrl+C (SIGINT)
+signal.signal(signal.SIGINT, signal_handler)
+
+# Start sniffing on the wireless interface in monitor mode
+print(f"Sniffing on {iface}, waiting for ICMP Echo Requests from {KNOWN_IP}...")
+sniff(iface=iface, prn=process_packet, filter="icmp", store=0)
