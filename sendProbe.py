@@ -8,6 +8,7 @@ def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--interface", "-i", default="wlan1", help="Network Monitoring Interface")
     parser.add_argument("--channel","-c", default="1,6,11", help="Wireless channel to broadcast on")
+    parser.add_argument("--rate","-r", default="5", help="Probe rate per second")
     return parser.parse_args()
 
 def channel_set(interface, channel):
@@ -44,6 +45,8 @@ def main():
 
     id = get_mac_address()
 
+    rate = float(1/args.rate)
+
     print(f'probe mac: {id}')
 
     channel_set(args.interface, args.channel)
@@ -51,7 +54,7 @@ def main():
     while True:
         frame = create_probe_request('WallFly', id)
         sendp(frame, iface=args.interface, verbose=False)
-        time.sleep(0.2)
+        time.sleep(rate)
     
 
 if __name__ == '__main__':
