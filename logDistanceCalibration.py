@@ -28,9 +28,12 @@ def packet_handler(pkt):
         mac_addr = pkt.addr2
         mac_addr = mac_addr.upper()
         rssi = pkt.dBm_AntSignal
-        
+        # ssid = pkt.getlayer(Dot11ProbeReq).info.decode()
+        # print(f'{mac_addr} -> {rssi}')
+        # print(pkt.getlayer(Dot11ProbeReq).info.decode())
         # print(f'checking {mac_addr} against listed {key}')
         if mac_addr.upper() == mac.upper():
+            print(rssi)
             # data = (f'{mac_addr}|{rssi}|{distance}')
             # new_row = {'mac': mac_addr, 'rssi': rssi, 'distance': distance}
             # df = df.append(new_row, ignore_index=True)
@@ -58,36 +61,65 @@ def main():
 
     while True:
         try:
-            sniff(iface=args.interface, prn=packet_handler, timeout=0.5)
+            if float(args.distance) == -1:
+                raise KeyboardInterrupt
+            sniff(iface=args.interface, prn=packet_handler, timeout=0.1)
 
         except KeyboardInterrupt:
             # df.to_csv('rssi-distance,csv', index=False)
             if args.mode == 'pt':
-                print(f'PT value {sum(recvList)/len(recvList)}, ({sum(recvList)}/{len(recvList)})')
+                if len(recvList) != 0:
+                    print(f'\nPT value {sum(recvList)/len(recvList)}, ({sum(recvList)}/{len(recvList)})')
+                else:
+                    print(f'No packets from {mac}, cannot calibrate PT')
             elif args.mode == 'n':
-                currentValue = sum(recvList)/len(recvList)
+                if float(args.distance) < 1.1 and float(args.distance) != -1:
+                    print(f'Distance of {args.distance} too low for calibrating N')
+                    exit()
+                if len(recvList) != 0:
+                    currentValue = sum(recvList)/len(recvList)
+                else:
+                    currentValue = 0
                 currentDistance = float(args.distance)
                 distances = []
-                values = []
+                rssis = []
                 nValues = []
                 with open('calibration.txt','a+') as file:
                     file.seek(0)
+                    
                     for line in file:
                         values = line.strip().split(',')
                         distances.append(float(values[0]))
-                        values.append(float(values[1]))
+                        rssis.append(float(values[1]))
                     if currentDistance != -1:
                         distances.append(currentDistance)
-                        values.append(currentValue)
+                        rssis.append(currentValue)
 
                     # for x in range(0,len(distances)):
                     #     nValues = (args.ptValue - values[x]) / (10 * )
-                    nValues = [(args.ptValue - rssi) / (10 * math.log10(distance)) for rssi, distance in zip(values, distances)]
-
-                    print(f'Current Calibrated N = {sum(nValues) / len(nValues)}')
-
+                    # print(f'{values}')
+                    # print(10 * math.log10(distances[0]))
+                    # print(rssis)
+                    # print(distances)
+                    # nValues = [(float(args.ptValue) - float(rssi)) / (10 * math.log10(float(distance))) for rssi, distance in zip(rssis, distances)]
+                    for rssi, distance in zip(rssis, distances):
+                        # print(f'\nrssi:{rssi}, d:{distance}, pt:{args.ptValue}')
+                        numer = float(args.ptValue) - float(rssi)
+                        denom = 10 * math.log10(float(distance))
+                        # print(f'numer:{numer}\ndenom:{denom}')
+                        n = numer/denom
+                        # print(n)
+                        nValues.append(n)
+                         
+                    # print(nValues)
+                    # print()
+                    if len(nValues) != 0:
+                        print(f'\nCurrent Calibrated N = {sum(nValues) / len(nValues)}')
+                        print(f'Distances used: {list(set(distances))}')
+                    else:
+                        print(f'Failed to calibrate N, no values found')
                     if currentDistance != -1:
-                        file.write(f'{currentDistance}, {currentValue}')
+                        file.write(f'{currentDistance}, {currentValue}\n')
                 # print(f'calibration file updated')
 
 
