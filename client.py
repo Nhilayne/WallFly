@@ -14,6 +14,9 @@ from time import ctime, sleep
 import os
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import padding
+import base64
+
 
 ##################
 # aes 128 key
@@ -144,16 +147,24 @@ def capture_packets(interface, queue):
     sniff(iface=interface, prn=packet_handler, timeout=None)
 
 def encrypt(data, key, iv):
-    data = data.encode()
+    print(f'encoding {data}')
+    padder = padding.PKCS7(algorithms.AES.block_size).padder()
+    padded_data = padder.update(data.encode()) + padder.finalize()
+    # data = data.encode()
     cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
     encryptor = cipher.encryptor()
-    return encryptor.update(data) + encryptor.finalize()
+    ciphertext = encryptor.update(padded_data) + encryptor.finalize()
+    return base64.b64encode(ciphertext)
 
 def decrypt(data, key, iv):
+    ciphertext = base64.b64decode(data)
     cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
     decryptor = cipher.decryptor()
-    decrypted = decryptor.update(data) + decryptor.finalize()
-    return decrypted.decode()
+    decrypted = decryptor.update(ciphertext) + decryptor.finalize()
+    unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
+    done = unpadder.update(decrypted) + unpadder.finalize()
+    print(f'decrp: {done}')
+    return done.decode()
 
 def main():
 
@@ -219,12 +230,15 @@ def main():
             # check for server messages
             for packet in readSockets:
                 data = packet.recv(1024)
-                data = decrypt(data,aesKey,aesIV)
+                if len(data) == 0:
+                      data = None
+                
                 if not data:
                     print('Server connection closed')
                     conn.close()
                     exit()
                 else:
+                    data = decrypt(data,aesKey,aesIV)
                     # data = msg.decode()
                     if 'update' not in data:
                         continue
