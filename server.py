@@ -9,6 +9,15 @@ from multiprocessing import pool
 import pandas as pd
 import uuid 
 from collections import defaultdict
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
+
+##################
+# aes 128 key
+#f553692b0eeeb0fc14da46a5a26826164511306cebf2b1ef
+# iv
+#c0dabc32dba054feba4d60c24e7fa50b
+##################
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -16,6 +25,7 @@ def get_args():
     parser.add_argument("--port", "-p", default=8505, help="Listening Port")
     parser.add_argument("--databaseAddress", "-da", default=None, help="Database IP")
     parser.add_argument("--databasePort", "-dp", default=None, help="Database port")
+    parser.add_argument("--knownLocation", "-loc", default=None, help="Static location vector, use with specified mac sniffing on clients")
     #parser.add_argument("--interface", "-i", default="wlan0", help="Network interface")
     return parser.parse_args()
 
@@ -70,7 +80,7 @@ def privatize(mac):
 #Data odering and pass-off
 ####
 
-def order_data(mac_address, client_id, packet_data):
+def order_data(mac_address, client_id, packet_data, locationKnown=False):
     current_time = time.time()
     
     # Add or update packet data with timestamp for the specific client
@@ -78,15 +88,27 @@ def order_data(mac_address, client_id, packet_data):
 
     # Check if we have received packets from 3 unique clients for this MAC address
     if len(packets[mac_address]) == 3:
-        process_packets(mac_address, packets.pop(mac_address))
+        process_packets(mac_address, packets.pop(mac_address), locationKnown)
 
     # After adding the packet, check and clean up old groups
     cleanup_old_groups(current_time)
 
-def process_packets(mac, packet_group):
+def process_packets(mac, packet_group, locationKnown=False):
     # Package the three packets and send them for further processing
     # print(f"Created packet group for {mac}: {packet_group}")
-    print(f"Created packet group for {mac}")
+    if locationKnown:
+        # format into dataframe, export to csv for external analysis
+        print('################__LOC_KNOWN__################')
+        print(f"Created packet group for {mac}")
+        print(packet_group)
+        print('#############################################')
+    else:
+        # actually make prediction or pass to prediction function
+        print('#############################################')
+        print(f"Created packet group for {mac}")
+        print(packet_group)
+        print('#############################################')
+
 
 def cleanup_old_groups(current_time):
     to_remove = []
@@ -101,6 +123,15 @@ def cleanup_old_groups(current_time):
         print(f"Removing stale packets for MAC: {mac_address}")
         del packets[mac_address]
 
+def encrypt(data, key, iv):
+    cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
+    encryptor = cipher.encryptor()
+    return encryptor.update(data) + encryptor.finalize()
+
+def decrypt(data, key, iv):
+    cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
+    decryptor = cipher.decryptor()
+    return decryptor.update(data) + decryptor.finalize()
 
 def main():
 
@@ -115,6 +146,9 @@ def main():
     serverID = get_mac_address()
 
     networkPositions, inputSet = init_data_defaults(serverID)
+
+    aesKey = b'f553692b0eeeb0fc14da46a5a26826164511306cebf2b1ef'
+    aesIV = b'c0dabc32dba054feba4d60c24e7fa50b'
 
     global packets
     packets = defaultdict(dict)  # For storing packets by MAC and client
@@ -159,7 +193,8 @@ def main():
                 case(2):
                     for connection in connections:
                         if connection != server or db:
-                            connection.send('start'.encode())
+                            # connection.send('start'.encode())
+                            connection.send(encrypt('start',aesKey,aesIV))
                 case(3):
                     #send mac list to all connected clients
                     for connection in connections:
@@ -167,7 +202,8 @@ def main():
                             ip,port = connection.getpeername()
                             for key, value in networkPositions.items():
                                 print(f'sending {key}|{value} to {ip}:{port}')
-                                connection.sendall(f'update|{key}|{value}'.encode())
+                                # connection.sendall(f'update|{key}|{value}'.encode())
+                                connection.sendall(f'update|{key}|{value}',aesKey,aesIV)
                 case(4):
                     #show recent data
                     print(inputSet.tail(6))
@@ -194,6 +230,7 @@ def main():
                     #client_connection.send(networkPositions.keys.encode())
                 else:
                     msg = connection.recv(1024)
+                    msg = decrypt(msg,aesKey,aesIV)
                     if not msg:
                         connections.remove(connection)
                     else:
@@ -216,8 +253,9 @@ def main():
                         hashed_mac = privatize(data[0])
                         rssi = data[1]
                         timestamp = data[2]
+                        environment = data[3::]
                         # src = ip
-                        order_data(hashed_mac, ip, (rssi, timestamp))
+                        order_data(hashed_mac, ip, (rssi, timestamp, environment), args.knownLocation)
                         # row = pd.DataFrame({'mac':[hashed_mac], 'rssi':[rssi], 'time':[timestamp], 'ip':[src]})
                         # inputSet = pd.concat([inputSet,row], ignore_index=True)
             pass
