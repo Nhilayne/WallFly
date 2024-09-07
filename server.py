@@ -124,6 +124,7 @@ def cleanup_old_groups(current_time):
         del packets[mac_address]
 
 def encrypt(data, key, iv):
+    data = data.encode()
     cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
     encryptor = cipher.encryptor()
     return encryptor.update(data) + encryptor.finalize()
@@ -131,7 +132,8 @@ def encrypt(data, key, iv):
 def decrypt(data, key, iv):
     cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
     decryptor = cipher.decryptor()
-    return decryptor.update(data) + decryptor.finalize()
+    decrypted = decryptor.update(data) + decryptor.finalize()
+    return decrypted.decode()
 
 def main():
 
@@ -147,8 +149,8 @@ def main():
 
     networkPositions, inputSet = init_data_defaults(serverID)
 
-    aesKey = b'f553692b0eeeb0fc14da46a5a26826164511306cebf2b1ef'
-    aesIV = b'c0dabc32dba054feba4d60c24e7fa50b'
+    aesKey = b'f553692b0eeeb0fc14da46a5a2682616'#48
+    aesIV = b'c0dabc32dba054fe'#32
 
     global packets
     packets = defaultdict(dict)  # For storing packets by MAC and client
@@ -203,7 +205,7 @@ def main():
                             for key, value in networkPositions.items():
                                 print(f'sending {key}|{value} to {ip}:{port}')
                                 # connection.sendall(f'update|{key}|{value}'.encode())
-                                connection.sendall(f'update|{key}|{value}',aesKey,aesIV)
+                                connection.sendall(encrypt(f'update|{key}|{value}',aesKey,aesIV))
                 case(4):
                     #show recent data
                     print(inputSet.tail(6))
@@ -220,6 +222,7 @@ def main():
                     connections = tempConnections
                 case(6):
                     #close out app
+                    print('Server stopped')
                     exit()
                     
             for connection in readSockets:
@@ -234,7 +237,8 @@ def main():
                     if not msg:
                         connections.remove(connection)
                     else:
-                        msg=msg.decode()
+                        # msg=msg.decode()
+                        # print(msg)
                         data = msg.split('|')
                         if data[0] == 'init':
                             data[2] = data[2].strip('[')
@@ -249,7 +253,7 @@ def main():
                         # data.append(address[0])
 
                         ip, _ = connection.getpeername()
-                        print(f'{ip} sent {data}')
+                        # print(f'{ip} sent {data}')
                         hashed_mac = privatize(data[0])
                         rssi = data[1]
                         timestamp = data[2]
@@ -265,7 +269,7 @@ def main():
 
 
         except KeyboardInterrupt:
-            print(f'Force close detected, shutting down gracefully')
+            print(f'\nForce close detected, shutting down gracefully')
             server.close()
             # print(inputSet.head(10))
             # print(networkPositions.keys)

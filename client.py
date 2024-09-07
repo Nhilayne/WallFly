@@ -144,6 +144,7 @@ def capture_packets(interface, queue):
     sniff(iface=interface, prn=packet_handler, timeout=None)
 
 def encrypt(data, key, iv):
+    data = data.encode()
     cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
     encryptor = cipher.encryptor()
     return encryptor.update(data) + encryptor.finalize()
@@ -151,7 +152,8 @@ def encrypt(data, key, iv):
 def decrypt(data, key, iv):
     cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
     decryptor = cipher.decryptor()
-    return decryptor.update(data) + decryptor.finalize()
+    decrypted = decryptor.update(data) + decryptor.finalize()
+    return decrypted.decode()
 
 def main():
 
@@ -159,8 +161,8 @@ def main():
     
     clientID = get_mac_address()
 
-    aesKey = b'f553692b0eeeb0fc14da46a5a26826164511306cebf2b1ef'
-    aesIV = b'c0dabc32dba054feba4d60c24e7fa50b'
+    aesKey = b'f553692b0eeeb0fc14da46a5a2682616'#48
+    aesIV = b'c0dabc32dba054fe'#32
 
     #Force sync to ntp server
     ####
@@ -216,14 +218,14 @@ def main():
             
             # check for server messages
             for packet in readSockets:
-                msg = packet.recv(1024)
-                msg = decrypt(msg,aesKey,aesIV)
-                if not msg:
+                data = packet.recv(1024)
+                data = decrypt(data,aesKey,aesIV)
+                if not data:
                     print('Server connection closed')
                     conn.close()
                     exit()
                 else:
-                    data = msg.decode()
+                    # data = msg.decode()
                     if 'update' not in data:
                         continue
                     # print(f'recvd {data}')
