@@ -144,7 +144,7 @@ def capture_packets(interface, queue):
     def packet_handler(packet):
         queue.put(packet)
     
-    sniff(iface=interface, prn=packet_handler, timeout=None)
+    sniff(iface=interface, prn=packet_handler, timeout=None, store=0)
 
 def encrypt(data, key, iv):
     # print(f'encoding {data}')
@@ -215,7 +215,7 @@ def main():
     #start sync'd channel hopping in separate thread if multiple
     #wait for server start signal
     print('Waiting for network size')
-    size = int(decrypt(conn.recv(1024)))
+    size = int(decrypt(conn.recv(1024),aesKey, aesIV))
 
 
     for x in range(0,size):
@@ -234,18 +234,6 @@ def main():
         networkStrength[peerInfo[1]] = [relativeDistance, 0]
         acknowledge = encrypt('peer recvd', aesKey,aesIV)
         conn.send(acknowledge)
-
-
-    # data = decrypt(data,aesKey,aesIV)
-    # # data = msg.decode()
-    # if 'update' not in data:
-    #     continue
-    # # print(f'recvd {data}')
-    # data = data.split('update')
-    # for msg in data:
-    #     if msg =='':
-    #         continue
-    #     # print(msg)
         
     probeFrame = create_probe_request('WallFly', clientID)
 

@@ -35,7 +35,7 @@ def get_args():
 def init_server(address, port):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.bind((address, int(port)))
-    server.setblocking(False)
+    # server.setblocking(False)
     server.listen()
     return server
 
@@ -91,20 +91,20 @@ def order_data(mac_address, client_id, packet_data, locationKnown=False):
 
     # Check if we have received packets from 3 unique clients for this MAC address
     if len(packets[mac_address]) == 3:
-        process_packets(mac_address, packets.pop(mac_address))
+        process_packets(mac_address, packets.pop(mac_address), locationKnown)
 
     # After adding the packet, check and clean up old groups
     cleanup_old_groups(current_time)
 
-def process_packets(mac, packet_group):
+def process_packets(mac, packet_group, locationKnown):
     # Package the three packets and send them for further processing
     # print(f"Created packet group for {mac}: {packet_group}")
     if locationKnown:
         # format into dataframe, export to csv for external analysis
-        print('################__LOC_KNOWN__################')
+        # print('################__LOC_KNOWN__################')
         print(f"Created packet group for {mac} at {locationKnown}")
         print(packet_group)
-        print('#############################################')
+        # print('#############################################')
     else:
         # actually make prediction or pass to prediction function
         print('#############################################')
@@ -163,6 +163,8 @@ def main():
 
     networkPositions, inputSet = init_data_defaults(serverID)
 
+    peerNum = 0
+
     aesKey = b'f553692b0eeeb0fc14da46a5a2682616'#48
     aesIV = b'c0dabc32dba054fe'#32
 
@@ -182,8 +184,8 @@ def main():
 
     print(f'\n\nSelect an action:')
     print(f'1: Display Current Connections \t 4: Display Buffer Tail')
-    print(f'2: Start Connected Sniffers \t 5: Disconnect Clients')
-    print(f'3: Distribute Client List \t 6: Exit')
+    print(f'2: Distribute Netwok Size \t 5: Disconnect Clients')
+    print(f'3: Distribute Peers and Start \t 6: Exit')
     while True:
         try:        
             readSockets,_,_ = select.select(connections,[],[],0)
@@ -195,6 +197,7 @@ def main():
 
             match(input):
                 case(1):
+                    peerNum = 0
                     #display all active connections
                     for connection in connections:
                         if connection == server:
@@ -205,12 +208,15 @@ def main():
                             print(f'database: {ip}:{port}')
                         else:
                             ip,port = connection.getpeername()
+                            peerNum += 1
                             print(f'client: {ip}:{port}')
+                    print(f'{peerNum} peers')
                 case(2):
+                    print(f'Distributing network size [{peerNum}]')
                     for connection in connections:
                         if connection != server or db:
                             # connection.send('start'.encode())
-                            connection.send(encrypt('start',aesKey,aesIV))
+                            connection.send(encrypt(f'{peerNum}',aesKey,aesIV))
                 case(3):
                     #send mac list to all connected clients
                     for connection in connections:
@@ -219,7 +225,10 @@ def main():
                             for key, value in networkPositions.items():
                                 print(f'sending {key}|{value} to {ip}:{port}')
                                 # connection.sendall(f'update|{key}|{value}'.encode())
-                                connection.sendall(encrypt(f'update|{key}|{value}',aesKey,aesIV))
+                                data = encrypt(f'|{key}|{value}',aesKey,aesIV)
+                                connection.sendall(data)
+                                resp = connection.recv(1024)
+                                print('send loop: '+decrypt(resp,aesKey,aesIV))
                 case(4):
                     #show recent data
                     print(inputSet.tail(6))
@@ -227,19 +236,20 @@ def main():
                     #disconnect clients
                     tempConnections = []
                     for connection in connections:
-                        if connection != server or db:
-                            # print(f'closing {connection}')
+                        if connection != server and connection != db:
+                            print(f'closing {connection}')
                             connection.close()
                         else:
                             tempConnections.append(connection)
                     connections.clear()
                     connections = tempConnections
+                    peerNum = 0
                 case(6):
                     #close out app
                     print('Server stopped')
+                    for connection in connections:
+                        connection.close()
                     exit()
-                    # \r\x95\x0f\x802X\xdc\xb49mX\x93u\x1aOc\xa5vL\x86\xc5\xd0\x18=\r\x9a\xd1\xcc\xe2\xf3\x96h\xb5\xfa\x8e\x12\x06\xf7\xd5\x08
-                    # \r\x95\x0f\x802X\xdc\xb55m^\x94uN\x1ac\xf4\x7f|^\x18\xd7+ms\xeb\x1e\xa8\x0b\x11'\xde*\xcc\xdc2\x12\x17\xd1\xea
             for connection in readSockets:
                 if connection == server:
                     client_connection, address = server.accept()
@@ -275,7 +285,6 @@ def main():
                         pt = data[3]
                         n = data[4]
                         environment = data[5::]
-                        print(f'env: {environment}')
                         # src = ip
                         order_data(hashed_mac, ip, (rssi, timestamp, pt, n, environment), args.knownLocation)
                         # row = pd.DataFrame({'mac':[hashed_mac], 'rssi':[rssi], 'time':[timestamp], 'ip':[src]})
