@@ -205,7 +205,7 @@ def main():
     #sniffing interface channel parameters
     ####
     channels = args.channels.split(',')
-    channelHopInterval = 0.5 
+    channelHopInterval = 1 
     ####
     #start sync'd channel hopping in separate thread if multiple
     #wait for server start signal
@@ -263,7 +263,7 @@ def main():
                         location = location.split(',')
                         location = [float(x) for x in location]
                         #print(args.location)
-                        # print(f'vector for {msg[1]}: {msg[2]}')
+                        print(f'vector for {msg[1]}: {msg[2]}')
                         relativeDistance = get_distance_to_client(remoteLocation, location)
                         # print(f'distance between local and remote: {relativeDistance}')
                         networkStrength[msg[1]] = [relativeDistance, 0]

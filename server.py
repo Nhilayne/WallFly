@@ -87,16 +87,16 @@ def order_data(mac_address, client_id, packet_data, locationKnown=False):
     current_time = time.time()
     
     # Add or update packet data with timestamp for the specific client
-    packets[mac_address][client_id] = (packet_data, current_time)
+    packets[mac_address][client_id] = (packet_data, current_time, locationKnown)
 
     # Check if we have received packets from 3 unique clients for this MAC address
     if len(packets[mac_address]) == 3:
-        process_packets(mac_address, packets.pop(mac_address), locationKnown)
+        process_packets(mac_address, packets.pop(mac_address))
 
     # After adding the packet, check and clean up old groups
     cleanup_old_groups(current_time)
 
-def process_packets(mac, packet_group, locationKnown=False):
+def process_packets(mac, packet_group):
     # Package the three packets and send them for further processing
     # print(f"Created packet group for {mac}: {packet_group}")
     if locationKnown:
@@ -111,7 +111,6 @@ def process_packets(mac, packet_group, locationKnown=False):
         print(f"Created packet group for {mac}")
         print(packet_group)
         print('#############################################')
-
 
 def cleanup_old_groups(current_time):
     to_remove = []
@@ -273,9 +272,12 @@ def main():
                         hashed_mac = privatize(data[0])
                         rssi = data[1]
                         timestamp = data[2]
-                        environment = data[3::]
+                        pt = data[3]
+                        n = data[4]
+                        environment = data[5::]
+                        print(f'env: {environment}')
                         # src = ip
-                        order_data(hashed_mac, ip, (rssi, timestamp, environment), args.knownLocation)
+                        order_data(hashed_mac, ip, (rssi, timestamp, pt, n, environment), args.knownLocation)
                         # row = pd.DataFrame({'mac':[hashed_mac], 'rssi':[rssi], 'time':[timestamp], 'ip':[src]})
                         # inputSet = pd.concat([inputSet,row], ignore_index=True)
             pass
