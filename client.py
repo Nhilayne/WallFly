@@ -61,7 +61,7 @@ def get_distance_to_client(remotePosition, localPosition):
     distance = round(math.sqrt(position[0]**2 + position[1]**2 + position[2]**2),3)
     return distance
 
-def parse_packet(pkt, filter):
+def parse_packet(pkt, filter, pt, n):
     if not pkt.haslayer(Dot11):
         return None
     if pkt.type == 0 and pkt.subtype == 4:
@@ -73,7 +73,7 @@ def parse_packet(pkt, filter):
         # print(pkt)
         if filter and mac_addr.upper() != filter.upper():
             return None
-        data = (f'{mac_addr}|{rssi}|{pkt.time}')
+        data = (f'{mac_addr}|{rssi}|{pkt.time}|{pt}|{n}')
         for key, value in networkStrength.items():
             # print(f'checking {mac_addr} against listed {key}')
             if mac_addr.upper() == key.upper():
@@ -191,6 +191,11 @@ def main():
     # conn.send(initMsg.encode())
     conn.send(encrypt(initMsg,aesKey,aesIV))
 
+    location = args.location.strip('[')
+    location = location.strip(']')
+    location = location.split(',')
+    location = [float(x) for x in location]
+
     global send_buffer
     send_buffer = queue.Queue()
 
@@ -209,8 +214,41 @@ def main():
     ####
     #start sync'd channel hopping in separate thread if multiple
     #wait for server start signal
-    print('Waiting for server start signal')
-    conn.recv(1024)
+    print('Waiting for network size')
+    size = int(decrypt(conn.recv(1024)))
+
+
+    for x in range(0,size):
+        data = conn.recv(1024)
+        peerInfo = decrypt(data,aesKey,aesIV)
+        peerInfo = peerInfo.split('|')
+        # print(f'adding {msg[1]} to known network clients')
+        peerInfo[2] = peerInfo[2].strip('(')
+        peerInfo[2] = peerInfo[2].strip(')')
+        peerInfo[2] = peerInfo[2].split(',')
+        remoteLocation = [float(x) for x in peerInfo[2]]
+        #print(args.location)
+        print(f'vector for {peerInfo[1]}: {peerInfo[2]}')
+        relativeDistance = get_distance_to_client(remoteLocation, location)
+        # print(f'distance between local and remote: {relativeDistance}')
+        networkStrength[peerInfo[1]] = [relativeDistance, 0]
+        acknowledge = encrypt('peer recvd', aesKey,aesIV)
+        conn.send(acknowledge)
+
+
+    # data = decrypt(data,aesKey,aesIV)
+    # # data = msg.decode()
+    # if 'update' not in data:
+    #     continue
+    # # print(f'recvd {data}')
+    # data = data.split('update')
+    # for msg in data:
+    #     if msg =='':
+    #         continue
+    #     # print(msg)
+        
+    probeFrame = create_probe_request('WallFly', clientID)
+
     print('syncing Start')
     synchronized_start()
     
@@ -224,6 +262,8 @@ def main():
     sniffingThread = threading.Thread(target=capture_packets, args=(args.interface, send_buffer))
     sniffingThread.daemon = True
     sniffingThread.start()
+
+    sendp(probeFrame, iface=args.interface, verbose=False)
 
     print('starting')
     while True:
@@ -241,44 +281,45 @@ def main():
                     print('Server connection closed')
                     conn.close()
                     exit()
-                else:
-                    data = decrypt(data,aesKey,aesIV)
-                    # data = msg.decode()
-                    if 'update' not in data:
-                        continue
-                    # print(f'recvd {data}')
-                    data = data.split('update')
-                    for msg in data:
-                        if msg =='':
-                            continue
-                        # print(msg)
-                        msg = msg.split('|')
-                        # print(f'adding {msg[1]} to known network clients')
-                        msg[2] = msg[2].strip('(')
-                        msg[2] = msg[2].strip(')')
-                        msg[2] = msg[2].split(',')
-                        remoteLocation = [float(x) for x in msg[2]]
-                        location = args.location.strip('[')
-                        location = location.strip(']')
-                        location = location.split(',')
-                        location = [float(x) for x in location]
-                        #print(args.location)
-                        print(f'vector for {msg[1]}: {msg[2]}')
-                        relativeDistance = get_distance_to_client(remoteLocation, location)
-                        # print(f'distance between local and remote: {relativeDistance}')
-                        networkStrength[msg[1]] = [relativeDistance, 0]
-                    frame = create_probe_request('WallFly', clientID)
-                    sendp(frame, iface=args.interface, verbose=False)
+                # else:
+                #     data = decrypt(data,aesKey,aesIV)
+                #     # data = msg.decode()
+                #     if 'update' not in data:
+                #         continue
+                #     # print(f'recvd {data}')
+                #     data = data.split('update')
+                #     for msg in data:
+                #         if msg =='':
+                #             continue
+                #         # print(msg)
+                #         msg = msg.split('|')
+                #         # print(f'adding {msg[1]} to known network clients')
+                #         msg[2] = msg[2].strip('(')
+                #         msg[2] = msg[2].strip(')')
+                #         msg[2] = msg[2].split(',')
+                #         remoteLocation = [float(x) for x in msg[2]]
+                #         location = args.location.strip('[')
+                #         location = location.strip(']')
+                #         location = location.split(',')
+                #         location = [float(x) for x in location]
+                #         #print(args.location)
+                #         print(f'vector for {msg[1]}: {msg[2]}')
+                #         relativeDistance = get_distance_to_client(remoteLocation, location)
+                #         # print(f'distance between local and remote: {relativeDistance}')
+                #         networkStrength[msg[1]] = [relativeDistance, 0]
+                    # probeFrame = create_probe_request('WallFly', clientID)
+                    # sendp(probeFrame, iface=args.interface, verbose=False)
                     
 
             # send sniffed data to server and remove from queue
             while not send_buffer.empty():
                 pkt = send_buffer.get()
-                data = parse_packet(pkt, args.knownMAC)
+                data = parse_packet(pkt, args.knownMAC, args.ptValue, args.nValue)
                 if data:
-                    data += (f'|{args.ptValue}|{args.nValue}')
+                    # data += (f'|{args.ptValue}|{args.nValue}')
                     # conn.sendall(data.encode())
                     conn.sendall(encrypt(data,aesKey,aesIV))
+
             # broadcast ping request for other clients to sniff.
             ##########
             # with distance known from server provided blacklist,
@@ -288,10 +329,10 @@ def main():
             environmentBaselineTimer += 1
             if environmentBaselineTimer >= 10000000:
                 environmentBaselineTimer = 0
-                frame = create_probe_request('wallfly', clientID)
+                # frame = create_probe_request('wallfly', clientID)
                 # print("broadcasting probe")
                 # sendp(frame, iface=interface, count=1, inter=0.1, verbose=0)
-                sendp(frame, iface=args.interface, verbose=False)
+                sendp(probeFrame, iface=args.interface, verbose=False)
 
         except KeyboardInterrupt:
             conn.close()
