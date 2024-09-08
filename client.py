@@ -164,6 +164,9 @@ def decrypt(data, key, iv):
     unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
     done = unpadder.update(decrypted) + unpadder.finalize()
     print(f'decrp: {done}')
+    if b')' in done:
+        print(f'possible oversend found, trimming')
+        done = done.split(b')')[0] + b')'
     return done.decode()
 
 def main():
