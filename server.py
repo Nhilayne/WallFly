@@ -11,6 +11,9 @@ import uuid
 from collections import defaultdict
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import padding
+import base64
+
 
 ##################
 # aes 128 key
@@ -99,7 +102,7 @@ def process_packets(mac, packet_group, locationKnown=False):
     if locationKnown:
         # format into dataframe, export to csv for external analysis
         print('################__LOC_KNOWN__################')
-        print(f"Created packet group for {mac}")
+        print(f"Created packet group for {mac} at {locationKnown}")
         print(packet_group)
         print('#############################################')
     else:
@@ -124,16 +127,28 @@ def cleanup_old_groups(current_time):
         del packets[mac_address]
 
 def encrypt(data, key, iv):
-    data = data.encode()
+    # print(f'encoding {data}')
+    data += '&'
+    padder = padding.PKCS7(algorithms.AES.block_size).padder()
+    padded_data = padder.update(data.encode()) + padder.finalize()
+    # data = data.encode()
     cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
     encryptor = cipher.encryptor()
-    return encryptor.update(data) + encryptor.finalize()
+    ciphertext = encryptor.update(padded_data) + encryptor.finalize()
+    return base64.b64encode(ciphertext)
 
 def decrypt(data, key, iv):
+    ciphertext = base64.b64decode(data)
     cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
     decryptor = cipher.decryptor()
-    decrypted = decryptor.update(data) + decryptor.finalize()
-    return decrypted.decode()
+    decrypted = decryptor.update(ciphertext) + decryptor.finalize()
+    unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
+    done = unpadder.update(decrypted) + unpadder.finalize()
+    # print(f'decrp: {done}')
+    if b'&' in done:
+        # print(f'possible oversend found, trimming')
+        done = done.split(b'&')[0]
+    return done.decode()
 
 def main():
 
@@ -200,7 +215,7 @@ def main():
                 case(3):
                     #send mac list to all connected clients
                     for connection in connections:
-                        if connection != server or db:
+                        if connection != server and connection != db:
                             ip,port = connection.getpeername()
                             for key, value in networkPositions.items():
                                 print(f'sending {key}|{value} to {ip}:{port}')
@@ -224,7 +239,8 @@ def main():
                     #close out app
                     print('Server stopped')
                     exit()
-                    
+                    # \r\x95\x0f\x802X\xdc\xb49mX\x93u\x1aOc\xa5vL\x86\xc5\xd0\x18=\r\x9a\xd1\xcc\xe2\xf3\x96h\xb5\xfa\x8e\x12\x06\xf7\xd5\x08
+                    # \r\x95\x0f\x802X\xdc\xb55m^\x94uN\x1ac\xf4\x7f|^\x18\xd7+ms\xeb\x1e\xa8\x0b\x11'\xde*\xcc\xdc2\x12\x17\xd1\xea
             for connection in readSockets:
                 if connection == server:
                     client_connection, address = server.accept()
@@ -232,7 +248,7 @@ def main():
                     connections.append(client_connection)
                     #client_connection.send(networkPositions.keys.encode())
                 else:
-                    msg = connection.recv(1024)
+                    msg = connection.recv(2048)
                     msg = decrypt(msg,aesKey,aesIV)
                     if not msg:
                         connections.remove(connection)

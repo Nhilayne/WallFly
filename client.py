@@ -147,7 +147,8 @@ def capture_packets(interface, queue):
     sniff(iface=interface, prn=packet_handler, timeout=None)
 
 def encrypt(data, key, iv):
-    print(f'encoding {data}')
+    # print(f'encoding {data}')
+    data += '&'
     padder = padding.PKCS7(algorithms.AES.block_size).padder()
     padded_data = padder.update(data.encode()) + padder.finalize()
     # data = data.encode()
@@ -163,10 +164,10 @@ def decrypt(data, key, iv):
     decrypted = decryptor.update(ciphertext) + decryptor.finalize()
     unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
     done = unpadder.update(decrypted) + unpadder.finalize()
-    print(f'decrp: {done}')
-    if b')' in done:
-        print(f'possible oversend found, trimming')
-        done = done.split(b')')[0] + b')'
+    # print(f'decrp: {done}')
+    if b'&' in done:
+        # print(f'possible oversend found, trimming')
+        done = done.split(b'&')[0]
     return done.decode()
 
 def main():
