@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import padding
 import base64
+import numpy as np
 
 
 ##################
@@ -79,6 +80,58 @@ def privatize(mac):
     # print(f'hashed mac:{hashed}')
     return hashed    
 
+# location calc functions
+####
+def rssi_to_dist(rssi, pt, n):
+    return 10**((pt-rssi) / (10*n))
+
+def rssi_loc(r1,r2,r3,locs):
+    d1 = rssi_to_dist(r1)
+    d2 = rssi_to_dist(r2)
+    d3 = rssi_to_dist(r3)
+
+    x1,y1,z1 = locs[0]
+    x2,y2,z2 = locs[0]
+    x3,y3,z3 = locs[0]
+
+    A = np.array([
+        [2*(x2-x1),2*(y2-y1),2*[z2-z1]],
+        [2*(x3-x1),2*(y3-y1),2*[z3-z1]],
+    ])
+    
+    B = np.array([
+        d1**2 - d2**2 + x2**2 - x1**2 + y2**2 - y1**2 + z2** - z1**2,
+        d1**2 - d3**2 + x3**2 - x1**2 + y3**2 - y1**2 + z3** - z1**2,
+    ])
+
+    try:
+        estimate = np.linalg.pinv(A).dot(B).tolist()
+    except np.linalg.LinAlgError:
+        print('Singular matrix no solution found')
+    
+    return estimate
+
+def toa_to_dist(toa, ref_toa):
+    c = 3e8
+    return c * (toa - ref_toa)
+
+def toa_loc(locs, distances):
+    A = np.array([
+        [locs[1][0] - locs[0][0],
+         locs[1][1] - locs[0][1],
+         locs[1][2] - locs[0][2]],
+        [locs[2][0] - locs[0][0],
+         locs[2][1] - locs[0][1],
+         locs[2][2] - locs[0][2]],
+    ])
+    B = 0.5 * np.array([
+        distances[1]**2 - np.sum(locs[1]**2) + np.sum(locs[0]**2),
+        distances[2]**2 - np.sum(locs[2]**2) + np.sum(locs[0]**2),
+    ])
+
+    estimate = np.linalg.pinv(A).dot(B).tolist()
+
+    return estimate
 
 #Data odering and pass-off
 ####
@@ -96,14 +149,43 @@ def order_data(mac_address, client_id, packet_data, locationKnown=False):
     # After adding the packet, check and clean up old groups
     cleanup_old_groups(current_time)
 
-def process_packets(mac, packet_group, locationKnown):
+def process_packets(mac, packetGroup, locationKnown):
     # Package the three packets and send them for further processing
     # print(f"Created packet group for {mac}: {packet_group}")
     if locationKnown:
+        global trainSet
+        global groupCount
+
+        groupCount += 1
+
+        keys = list(packetGroup.keys())
+        rssi_cols = ['rssi1', 'rssi2', 'rssi3']
+        pt_cols = ['pt1', 'pt2', 'pt3']
+        n_cols = ['n1', 'n2', 'n3']
+        loc_cols = ['loc1', 'loc2', 'loc3']
+
+        # Create DataFrame
+        packetGroupDF = pd.DataFrame({
+            rssi_cols[i]: [packetGroup[keys[i]][0]] for i in range(len(keys))
+        }).assign(**{
+            pt_cols[i]: [packetGroup[keys[i]][2]] for i in range(len(keys))
+        }).assign(**{
+            n_cols[i]: [packetGroup[keys[i]][1]] for i in range(len(keys))
+        }).assign(**{
+            loc_cols[i]: [packetGroup[keys[i]][3]] for i in range(len(keys))
+        })
+
+        packetGroupDF['RSSILoc'] = rssi_loc(packetGroupDF['rssi1'],packetGroupDF['rssi2'],packetGroupDF['rssi3'],[packetGroupDF['loc1'],packetGroupDF['loc2'],packetGroupDF['loc3']])
+        # packetGroupDF['ToALoc'] = toa_loc()
+        packetGroupDF['TrueLoc'] = locationKnown
+
+        trainSet = pd.concat([trainSet, packetGroupDF], ignore_index=True)
+
+        print(f'packet groups found: {groupCount}')
         # format into dataframe, export to csv for external analysis
         # print('################__LOC_KNOWN__################')
-        print(f"Created packet group for {mac} at {locationKnown}")
-        print(packet_group)
+        # print(f"Created packet group for {mac} at {locationKnown}")
+        # print(packet_group)
         # print('#############################################')
     else:
         # actually make prediction or pass to prediction function
@@ -124,6 +206,9 @@ def cleanup_old_groups(current_time):
     for mac_address in to_remove:
         print(f"Removing stale packets for MAC: {mac_address}")
         del packets[mac_address]
+
+def outputDFCSV(outputDF, filename):
+    outputDF.to_csv(filename, mode='a', header=not pd.io.common.file_exists(filename),index=False)
 
 def encrypt(data, key, iv):
     # print(f'encoding {data}')
@@ -173,6 +258,11 @@ def main():
     global AGE_LIMIT
     AGE_LIMIT = 10  # seconds
 
+    global trainSet
+    trainSet = pd.DataFrame()
+    global groupCount
+    groupCount = 0
+
     ###############################
     # # calc distance between server and a client node
     # position = tuple(float(x) for x in data[2][1:-1].split(','))
@@ -183,7 +273,7 @@ def main():
     ###############################
 
     print(f'\n\nSelect an action:')
-    print(f'1: Display Current Connections \t 4: Display Buffer Tail')
+    print(f'1: Display Current Connections \t 4: Query Last X Minutes')
     print(f'2: Distribute Netwok Size \t 5: Disconnect Clients')
     print(f'3: Distribute Peers and Start \t 6: Exit')
     while True:
@@ -212,23 +302,26 @@ def main():
                             print(f'client: {ip}:{port}')
                     print(f'{peerNum} peers')
                 case(2):
-                    print(f'Distributing network size [{peerNum}]')
+                    print(f'Distributing network size [{peerNum}]...')
                     for connection in connections:
                         if connection != server or db:
                             # connection.send('start'.encode())
                             connection.send(encrypt(f'{peerNum}',aesKey,aesIV))
+                    print('Done')
                 case(3):
                     #send mac list to all connected clients
+                    print('Distributing Peer List...')
                     for connection in connections:
                         if connection != server and connection != db:
                             ip,port = connection.getpeername()
                             for key, value in networkPositions.items():
-                                print(f'sending {key}|{value} to {ip}:{port}')
+                                # print(f'sending {key}|{value} to {ip}:{port}')
                                 # connection.sendall(f'update|{key}|{value}'.encode())
                                 data = encrypt(f'|{key}|{value}',aesKey,aesIV)
                                 connection.sendall(data)
                                 resp = connection.recv(1024)
-                                print('send loop: '+decrypt(resp,aesKey,aesIV))
+                                # print('send loop: '+decrypt(resp,aesKey,aesIV))
+                    print('Done')
                 case(4):
                     #show recent data
                     print(inputSet.tail(6))
@@ -249,6 +342,7 @@ def main():
                     print('Server stopped')
                     for connection in connections:
                         connection.close()
+                    outputDFCSV(trainSet, 'trainSet.csv')
                     exit()
             for connection in readSockets:
                 if connection == server:

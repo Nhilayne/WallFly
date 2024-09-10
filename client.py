@@ -217,7 +217,7 @@ def main():
     print('Waiting for network size')
     size = int(decrypt(conn.recv(1024),aesKey, aesIV))
 
-
+    print('Waiting for peer list')
     for x in range(0,size):
         data = conn.recv(1024)
         peerInfo = decrypt(data,aesKey,aesIV)
