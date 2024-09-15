@@ -14,6 +14,8 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import padding
 import base64
 import numpy as np
+import sqlite3
+import json
 
 
 ##################
@@ -25,7 +27,7 @@ import numpy as np
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--address", "-a", default="localhost", help="IP for server")
+    parser.add_argument("--address", "-a", default="localhost", help="IP of server")
     parser.add_argument("--port", "-p", default=8505, help="Listening Port")
     parser.add_argument("--databaseAddress", "-da", default=None, help="Database IP")
     parser.add_argument("--databasePort", "-dp", default=None, help="Database port")
@@ -42,11 +44,13 @@ def init_server(address, port):
 
 def connect_db(dbAddress, dbPort):
     if dbAddress or dbPort is None:
-        print("No database connection, exporting as .csv")
+        print("No database connection, only tracking results will be saved to wallfly.csv")
         return None
     else:
-        print(f"connecting to database at {dbAddress}:{dbPort} [Currently unimplemented]")
-        return None
+        print(f"connecting to database at {dbAddress}:{dbPort}")
+        connection = socket.socket()
+        connection.connect((dbAddress, int(dbPort)))
+        return connection
 
 def get_mac_address():
     id = uuid.getnode()
@@ -64,24 +68,24 @@ def init_data_defaults(serverMac):
 
 def menu(cmd):
     try:
+        query = None
         choice = int(cmd)
     except:
         print('Please enter a number')
         return None
-    if choice in range(1,11):
-        pass
+    if choice in range(1,7):
+        if choice == 4:
+            query = input()
         # break
     # print('Please enter a valid number')
 
-    return choice
+    return choice, query
 
 def privatize(mac):
     hashed = hashlib.sha256(mac.encode(), usedforsecurity=True).hexdigest()
     # print(f'hashed mac:{hashed}')
     return hashed    
 
-# location calc functions
-####
 def rssi_to_dist(rssi, pt, n):
     return 10**((float(pt)-float(rssi)) / (10*float(n)))
 
@@ -132,9 +136,6 @@ def toa_loc(locs, distances):
     estimate = np.linalg.pinv(A).dot(B).tolist()
 
     return estimate
-
-#Data odering and pass-off
-####
 
 def order_data(mac_address, client_id, packet_data, locationKnown=False):
     current_time = time.time()
@@ -210,7 +211,17 @@ def process_packets(mac, packetGroup, locationKnown):
         # actually make prediction or pass to prediction function
         print('#############################################')
         print(f"Created packet group for {mac}")
-        print(packetGroup)
+        # print(packetGroup)
+
+        # MAC is string, Location is 3d vector, TimeStamp is datetime from unix epoch
+        data = {'MAC': [10], 'Location': [20], 'TimeStamp': [30]}
+        
+        newRow = pd.DataFrame(data)
+        try:
+            newRow.to_csv('wallfly.csv', mode='a', header=False, index=False)
+        except PermissionError:
+            print("The file is open in another program and cannot be written to.")
+
         print('#############################################')
 
 def cleanup_old_groups(current_time):
@@ -261,7 +272,7 @@ def main():
 
     db = connect_db(args.databaseAddress, args.databasePort)
 
-    connections = [server]
+    connections = [server, db]
 
     serverID = get_mac_address()
 
@@ -292,17 +303,18 @@ def main():
     ###############################
 
     print(f'\n\nSelect an action:')
-    print(f'1: Display Current Connections \t 4: Query Last X Minutes')
+    print(f'1: Display Current Connections \t 4: Output DB Query')
     print(f'2: Distribute Netwok Size \t 5: Disconnect Clients')
     print(f'3: Distribute Peers and Start \t 6: Exit')
     while True:
         try:        
             readSockets,_,_ = select.select(connections,[],[],0)
             userInput, _, _ = select.select([sys.stdin], [], [], 0)
+            # dbOutput,_,_ = select.select(db,[],[],0)
 
             input = None
             if userInput:
-                input = menu(sys.stdin.readline().strip())
+                input, query = menu(sys.stdin.readline().strip())
 
             match(input):
                 case(1):
@@ -342,8 +354,10 @@ def main():
                                 # print('send loop: '+decrypt(resp,aesKey,aesIV))
                     print('Done')
                 case(4):
-                    #show recent data
-                    print(inputSet.tail(6))
+                    #query DB
+                    if db is None:
+                        continue
+                    print(f'query for db: {query}')
                 case(5):
                     #disconnect clients
                     tempConnections = []
@@ -363,12 +377,17 @@ def main():
                         connection.close()
                     outputDFCSV(trainSet, 'trainSet.csv')
                     exit()
+            
             for connection in readSockets:
                 if connection == server:
                     client_connection, address = server.accept()
                     print(f'New connection from {address[0]}')
                     connections.append(client_connection)
                     #client_connection.send(networkPositions.keys.encode())
+                elif connection == db:
+                    msg = connection.recv(2048)
+                    print(f'db sent:\n{msg}')
+                    #parse more of db output
                 else:
                     msg = connection.recv(2048)
                     msg = decrypt(msg,aesKey,aesIV)
