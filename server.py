@@ -83,25 +83,25 @@ def privatize(mac):
 # location calc functions
 ####
 def rssi_to_dist(rssi, pt, n):
-    return 10**((pt-rssi) / (10*n))
+    return 10**((float(pt)-float(rssi)) / (10*float(n)))
 
-def rssi_loc(r1,r2,r3,locs):
-    d1 = rssi_to_dist(r1)
-    d2 = rssi_to_dist(r2)
-    d3 = rssi_to_dist(r3)
+def rssi_loc(d1,d2,d3,locs):
 
-    x1,y1,z1 = locs[0]
-    x2,y2,z2 = locs[0]
-    x3,y3,z3 = locs[0]
+    loc1 = (float(x) for x in locs[0].strip('[]').split(','))
+    loc2 = (float(x) for x in locs[1].strip('[]').split(','))
+    loc3 = (float(x) for x in locs[2].strip('[]').split(','))
+    x1,y1,z1 = loc1
+    x2,y2,z2 = loc2
+    x3,y3,z3 = loc3
 
     A = np.array([
-        [2*(x2-x1),2*(y2-y1),2*[z2-z1]],
-        [2*(x3-x1),2*(y3-y1),2*[z3-z1]],
+        [2*(x2-x1),2*(y2-y1),2*(z2-z1)],
+        [2*(x3-x1),2*(y3-y1),2*(z3-z1)],
     ])
     
     B = np.array([
-        d1**2 - d2**2 + x2**2 - x1**2 + y2**2 - y1**2 + z2** - z1**2,
-        d1**2 - d3**2 + x3**2 - x1**2 + y3**2 - y1**2 + z3** - z1**2,
+        d1**2 - d2**2 + x2**2 - x1**2 + y2**2 - y1**2 + z2**2 - z1**2,
+        d1**2 - d3**2 + x3**2 - x1**2 + y3**2 - y1**2 + z3**2 - z1**2,
     ])
 
     try:
@@ -152,33 +152,52 @@ def order_data(mac_address, client_id, packet_data, locationKnown=False):
 def process_packets(mac, packetGroup, locationKnown):
     # Package the three packets and send them for further processing
     # print(f"Created packet group for {mac}: {packet_group}")
+    # print(packetGroup)
+    
+
+    keys = list(packetGroup.keys())
+    rssi_cols = ['rssi1', 'rssi2', 'rssi3']
+    pt_cols = ['pt1', 'pt2', 'pt3']
+    n_cols = ['n1', 'n2', 'n3']
+    loc_cols = ['loc1', 'loc2', 'loc3']
+
+    
+    # for i in range(len(keys)):
+    #     print(i)
+    #     print(packetGroup[keys[i]][0]) 
+    # print('####')
+    
+    # Create DataFrame
+    packetGroupDF = pd.DataFrame({
+        rssi_cols[i]: [packetGroup[keys[i]][0][0]] for i in range(len(keys))
+    },index=[0]).assign(**{
+        pt_cols[i]: [packetGroup[keys[i]][0][2]] for i in range(len(keys))
+    }).assign(**{
+        n_cols[i]: [packetGroup[keys[i]][0][3]] for i in range(len(keys))
+    }).assign(**{
+        loc_cols[i]: [packetGroup[keys[i]][0][4]] for i in range(len(keys))
+    })
+
+    # print(packetGroupDF.head())
+
+    d1 = rssi_to_dist(packetGroupDF.at[0,'rssi1'],packetGroupDF.at[0,'pt1'],packetGroupDF.at[0,'n1'])
+    d2 = rssi_to_dist(packetGroupDF.at[0,'rssi2'],packetGroupDF.at[0,'pt2'],packetGroupDF.at[0,'n2'])
+    d3 = rssi_to_dist(packetGroupDF.at[0,'rssi3'],packetGroupDF.at[0,'pt3'],packetGroupDF.at[0,'n3'])
+    rssiLoc = rssi_loc(d1,d2,d3,[packetGroupDF.at[0,'loc1'],packetGroupDF.at[0,'loc2'],packetGroupDF.at[0,'loc3']])
+    # print(rssiLoc)
+    packetGroupDF['RSSILoc'] = None
+    packetGroupDF.at[0,'RSSILoc'] = rssiLoc
+
+    # # packetGroupDF['ToALoc'] = toa_loc()
+    # packetGroupDF['TrueLoc'] = locationKnown
+
     if locationKnown:
         global trainSet
         global groupCount
 
         groupCount += 1
-
-        keys = list(packetGroup.keys())
-        rssi_cols = ['rssi1', 'rssi2', 'rssi3']
-        pt_cols = ['pt1', 'pt2', 'pt3']
-        n_cols = ['n1', 'n2', 'n3']
-        loc_cols = ['loc1', 'loc2', 'loc3']
-
-        # Create DataFrame
-        packetGroupDF = pd.DataFrame({
-            rssi_cols[i]: [packetGroup[keys[i]][0]] for i in range(len(keys))
-        }).assign(**{
-            pt_cols[i]: [packetGroup[keys[i]][2]] for i in range(len(keys))
-        }).assign(**{
-            n_cols[i]: [packetGroup[keys[i]][1]] for i in range(len(keys))
-        }).assign(**{
-            loc_cols[i]: [packetGroup[keys[i]][3]] for i in range(len(keys))
-        })
-
-        packetGroupDF['RSSILoc'] = rssi_loc(packetGroupDF['rssi1'],packetGroupDF['rssi2'],packetGroupDF['rssi3'],[packetGroupDF['loc1'],packetGroupDF['loc2'],packetGroupDF['loc3']])
-        # packetGroupDF['ToALoc'] = toa_loc()
         packetGroupDF['TrueLoc'] = locationKnown
-
+        # print(packetGroupDF.head())
         trainSet = pd.concat([trainSet, packetGroupDF], ignore_index=True)
 
         print(f'packet groups found: {groupCount}')
@@ -191,7 +210,7 @@ def process_packets(mac, packetGroup, locationKnown):
         # actually make prediction or pass to prediction function
         print('#############################################')
         print(f"Created packet group for {mac}")
-        print(packet_group)
+        print(packetGroup)
         print('#############################################')
 
 def cleanup_old_groups(current_time):
@@ -378,9 +397,10 @@ def main():
                         timestamp = data[2]
                         pt = data[3]
                         n = data[4]
-                        environment = data[5::]
+                        loc = data[5]
+                        # environment = data[5::]
                         # src = ip
-                        order_data(hashed_mac, ip, (rssi, timestamp, pt, n, environment), args.knownLocation)
+                        order_data(hashed_mac, ip, (rssi, timestamp, pt, n, loc), args.knownLocation)
                         # row = pd.DataFrame({'mac':[hashed_mac], 'rssi':[rssi], 'time':[timestamp], 'ip':[src]})
                         # inputSet = pd.concat([inputSet,row], ignore_index=True)
             pass

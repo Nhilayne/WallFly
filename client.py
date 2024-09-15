@@ -61,7 +61,7 @@ def get_distance_to_client(remotePosition, localPosition):
     distance = round(math.sqrt(position[0]**2 + position[1]**2 + position[2]**2),3)
     return distance
 
-def parse_packet(pkt, filter, pt, n):
+def parse_packet(pkt, filter, pt, n,location):
     if not pkt.haslayer(Dot11):
         return None
     if pkt.type == 0 and pkt.subtype == 4:
@@ -73,7 +73,7 @@ def parse_packet(pkt, filter, pt, n):
         # print(pkt)
         if filter and mac_addr.upper() != filter.upper():
             return None
-        data = (f'{mac_addr}|{rssi}|{pkt.time}|{pt}|{n}')
+        data = (f'{mac_addr}|{rssi}|{pkt.time}|{pt}|{n}|{location}')
         for key, value in networkStrength.items():
             # print(f'checking {mac_addr} against listed {key}')
             if mac_addr.upper() == key.upper():
@@ -82,7 +82,7 @@ def parse_packet(pkt, filter, pt, n):
                 # print(f'updated {key} from {temp} to {networkStrength[key][1]}')
                 # print(f'result:{networkStrength}')
                 return
-            data += (f'|{value}')
+            # data += (f'|{value}')
         # print(data)
         return data
 
@@ -302,7 +302,7 @@ def main():
             # send sniffed data to server and remove from queue
             while not send_buffer.empty():
                 pkt = send_buffer.get()
-                data = parse_packet(pkt, args.knownMAC, args.ptValue, args.nValue)
+                data = parse_packet(pkt, args.knownMAC, args.ptValue, args.nValue,location)
                 if data:
                     # data += (f'|{args.ptValue}|{args.nValue}')
                     # conn.sendall(data.encode())
