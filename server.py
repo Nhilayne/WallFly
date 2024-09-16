@@ -2,7 +2,7 @@ import sys
 import socket
 import argparse
 import time
-import math
+import datetime
 import select
 import hashlib
 from multiprocessing import pool
@@ -14,6 +14,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import padding
 import base64
 import numpy as np
+import joblib
 import sqlite3
 import json
 
@@ -137,18 +138,39 @@ def toa_loc(locs, distances):
 
     return estimate
 
+def convert_to_float_list(string):
+    try:
+        string = string.strip("[]")
+        return [float(x) for x in string.split(",")]
+    except ValueError:
+        return [0.0, 0.0, 0.0]
+
+def apply_binning(df, cols, binList):    
+    for col in cols:
+        df[col] = pd.cut(df[col], bins=binList, labels=False, include_lowest=True)
+        
+    return df
+    
+def get_datetime(epoch):
+    dt = datetime.datetime.fromtimestamp(epoch)
+    
+    # string in 'YYYY-MM-DD HH:MM:SS' format for SQLite.
+    return dt.strftime('%Y-%m-%d %H:%M:%S')
+
 def order_data(mac_address, client_id, packet_data, locationKnown=False):
     current_time = time.time()
-    
+    processed = None
     # Add or update packet data with timestamp for the specific client
-    packets[mac_address][client_id] = (packet_data, current_time, locationKnown)
+    packets[mac_address][client_id] = (packet_data, locationKnown)
 
     # Check if we have received packets from 3 unique clients for this MAC address
     if len(packets[mac_address]) == 3:
-        process_packets(mac_address, packets.pop(mac_address), locationKnown)
+        processed = process_packets(mac_address, packets.pop(mac_address), locationKnown)
 
     # After adding the packet, check and clean up old groups
     cleanup_old_groups(current_time)
+
+    return processed
 
 def process_packets(mac, packetGroup, locationKnown):
     # Package the three packets and send them for further processing
@@ -162,6 +184,7 @@ def process_packets(mac, packetGroup, locationKnown):
     n_cols = ['n1', 'n2', 'n3']
     loc_cols = ['loc1', 'loc2', 'loc3']
 
+    firstTimeFound = packetGroup[keys[1][0]]
     
     # for i in range(len(keys)):
     #     print(i)
@@ -193,36 +216,56 @@ def process_packets(mac, packetGroup, locationKnown):
     # packetGroupDF['TrueLoc'] = locationKnown
 
     if locationKnown:
+        # building a training set
         global trainSet
         global groupCount
-
         groupCount += 1
         packetGroupDF['TrueLoc'] = locationKnown
-        # print(packetGroupDF.head())
         trainSet = pd.concat([trainSet, packetGroupDF], ignore_index=True)
-
         print(f'packet groups found: {groupCount}')
-        # format into dataframe, export to csv for external analysis
-        # print('################__LOC_KNOWN__################')
-        # print(f"Created packet group for {mac} at {locationKnown}")
-        # print(packet_group)
-        # print('#############################################')
+        return None
     else:
-        # actually make prediction or pass to prediction function
+        # actually make location prediction
         print('#############################################')
         print(f"Created packet group for {mac}")
-        # print(packetGroup)
-
-        # MAC is string, Location is 3d vector, TimeStamp is datetime from unix epoch
-        data = {'MAC': [10], 'Location': [20], 'TimeStamp': [30]}
+        global predictionPipeline
         
-        newRow = pd.DataFrame(data)
-        try:
-            newRow.to_csv('wallfly.csv', mode='a', header=False, index=False)
-        except PermissionError:
-            print("The file is open in another program and cannot be written to.")
+        predictDF = packetGroupDF
 
+        for col in ['loc1', 'loc2', 'loc3', 'RSSILoc']:
+            predictDF[col] = predictDF[col].apply(convert_to_float_list)
+
+        for col in ['loc1', 'loc2', 'loc3', 'RSSILoc']:
+            predictDF[col] = predictDF[col].apply(lambda x: x if isinstance(x, list) and len(x) == 3 else [0.0, 0.0, 0.0])
+
+        for col in ['loc1', 'loc2', 'loc3', 'RSSILoc']:
+            predictDF[[f'{col}_x', f'{col}_y', f'{col}_z']] = pd.DataFrame(predictDF[col].tolist(), index=predictDF.index)
+
+        #  predictDF.apply(lambda row: rssi_to_dist(row['rssi1'], row['pt1'], row['n1']), axis=1)
+        predictDF['distance1'] = d1
+        predictDF['distance2'] = d2
+        predictDF['distance3'] = d3
+
+        rssiBins = [-100, -70, -65, -60, -55, -50, -45, -40, -35, -30, -25, -20, 0]
+        predictDF = apply_binning(predictDF, ['rssi1', 'rssi2', 'rssi3'], rssiBins)
+
+        predictDF = predictDF.drop(columns=['loc1', 'loc2', 'loc3', 'RSSILoc'])
+        
+        if predictionPipeline:
+            # pipeline will handle scaling, polynomial features, PCA, and the model prediction
+            predictions = predictionPipeline.predict(predictDF)
+        else:
+            # no model found, use base log-distance calc
+            predictions = rssiLoc
+        
+        print(predictions[0])
+
+        timestamp = get_datetime(firstTimeFound)
+
+        data = {'MAC': [mac], 'Location': [predictions[0]], 'TimeStamp': [timestamp]}
+        
         print('#############################################')
+        return (json.dumps(data), packetGroup.to_json())
 
 def cleanup_old_groups(current_time):
     to_remove = []
@@ -292,6 +335,13 @@ def main():
     trainSet = pd.DataFrame()
     global groupCount
     groupCount = 0
+
+    global predictionPipeline
+    try:
+        predictionPipeline = joblib.load('wallflyFitModel.pkl')
+    except FileNotFoundError as e:
+        print(f'Predictive model file not found: {e}\n\nLog-Distance estimation will be used')
+        predictionPipeline = None
 
     ###############################
     # # calc distance between server and a client node
@@ -419,7 +469,10 @@ def main():
                         loc = data[5]
                         # environment = data[5::]
                         # src = ip
-                        order_data(hashed_mac, ip, (rssi, timestamp, pt, n, loc), args.knownLocation)
+                        result = order_data(hashed_mac, ip, (rssi, timestamp, pt, n, loc), args.knownLocation)
+                        if result:
+                            print(f'send to DB:\n{result[0]}\n\n{result[1]}')
+                            # db.send(result)
                         # row = pd.DataFrame({'mac':[hashed_mac], 'rssi':[rssi], 'time':[timestamp], 'ip':[src]})
                         # inputSet = pd.concat([inputSet,row], ignore_index=True)
             pass
