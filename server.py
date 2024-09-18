@@ -44,7 +44,7 @@ def init_server(address, port):
     return server
 
 def connect_db(dbAddress, dbPort):
-    if dbAddress or dbPort is None:
+    if dbAddress is None or dbPort is None:
         print("No database connection, only tracking results will be saved to wallfly.csv")
         return None
     else:
@@ -73,7 +73,7 @@ def menu(cmd):
         choice = int(cmd)
     except:
         print('Please enter a number')
-        return None
+        return None, None
     if choice in range(1,7):
         if choice == 4:
             query = input()
@@ -184,7 +184,8 @@ def process_packets(mac, packetGroup, locationKnown):
     n_cols = ['n1', 'n2', 'n3']
     loc_cols = ['loc1', 'loc2', 'loc3']
 
-    firstTimeFound = packetGroup[keys[1][0]]
+    firstTimeFound = float(packetGroup[keys[0]][0][1])
+    print(f'firstTime: {firstTimeFound}')
     
     # for i in range(len(keys)):
     #     print(i)
@@ -232,10 +233,10 @@ def process_packets(mac, packetGroup, locationKnown):
         
         predictDF = packetGroupDF
 
-        for col in ['loc1', 'loc2', 'loc3', 'RSSILoc']:
+        for col in ['loc1', 'loc2', 'loc3']:
             predictDF[col] = predictDF[col].apply(convert_to_float_list)
 
-        for col in ['loc1', 'loc2', 'loc3', 'RSSILoc']:
+        for col in ['loc1', 'loc2', 'loc3']:
             predictDF[col] = predictDF[col].apply(lambda x: x if isinstance(x, list) and len(x) == 3 else [0.0, 0.0, 0.0])
 
         for col in ['loc1', 'loc2', 'loc3', 'RSSILoc']:
@@ -246,6 +247,10 @@ def process_packets(mac, packetGroup, locationKnown):
         predictDF['distance2'] = d2
         predictDF['distance3'] = d3
 
+        for col in ['rssi1', 'rssi2', 'rssi3']:
+            predictDF[col] = predictDF[col].apply(lambda x: int(x) )
+
+
         rssiBins = [-100, -70, -65, -60, -55, -50, -45, -40, -35, -30, -25, -20, 0]
         predictDF = apply_binning(predictDF, ['rssi1', 'rssi2', 'rssi3'], rssiBins)
 
@@ -254,6 +259,7 @@ def process_packets(mac, packetGroup, locationKnown):
         if predictionPipeline:
             # pipeline will handle scaling, polynomial features, PCA, and the model prediction
             predictions = predictionPipeline.predict(predictDF)
+            # predictions = np.array_str(predictions[0])
         else:
             # no model found, use base log-distance calc
             predictions = rssiLoc
@@ -262,16 +268,19 @@ def process_packets(mac, packetGroup, locationKnown):
 
         timestamp = get_datetime(firstTimeFound)
 
-        data = {'MAC': [mac], 'Location': [predictions[0]], 'TimeStamp': [timestamp]}
-        
+        data = {'type':'insert','MAC': mac, 'Location': f'[{predictions[0][0]},{predictions[0][1]},{predictions[0][2]}]', 'Timestamp': timestamp}
+        print(data)
         print('#############################################')
-        return (json.dumps(data), packetGroup.to_json())
+        #packetGroupDF.to_json(orient='records')[1:-1]
+        return json.dumps(data)
 
 def cleanup_old_groups(current_time):
     to_remove = []
     for mac_address, client_packets in packets.items():
         # Get the timestamp of the oldest packet in the group
-        oldest_timestamp = min(data[1] for data in client_packets.values())
+        oldest_timestamp = min(float(data[0][1]) for data in client_packets.values())
+        # print(f'values {client_packets.values()}')
+        # print(f'oldest time is {oldest_timestamp}')
         
         if current_time - oldest_timestamp > 5:
             to_remove.append(mac_address)
@@ -315,7 +324,10 @@ def main():
 
     db = connect_db(args.databaseAddress, args.databasePort)
 
-    connections = [server, db]
+    connections = [server]
+
+    if db:
+        connections.append(db)
 
     serverID = get_mac_address()
 
@@ -339,9 +351,13 @@ def main():
     global predictionPipeline
     try:
         predictionPipeline = joblib.load('wallflyFitModel.pkl')
+        print('Prediction model loaded successfully')
     except FileNotFoundError as e:
-        print(f'Predictive model file not found: {e}\n\nLog-Distance estimation will be used')
+        print(f'Predictive model file not found: {e}\nLog-Distance estimation will be used')
         predictionPipeline = None
+    
+    dbBackup = pd.DataFrame()
+
 
     ###############################
     # # calc distance between server and a client node
@@ -385,7 +401,7 @@ def main():
                 case(2):
                     print(f'Distributing network size [{peerNum}]...')
                     for connection in connections:
-                        if connection != server or db:
+                        if connection != server and connection != db:
                             # connection.send('start'.encode())
                             connection.send(encrypt(f'{peerNum}',aesKey,aesIV))
                     print('Done')
@@ -406,8 +422,13 @@ def main():
                 case(4):
                     #query DB
                     if db is None:
-                        continue
-                    print(f'query for db: {query}')
+                        print('No Database connection')
+                    else:
+                        
+                        #convert to db format
+                        query = json.dumps({'type': 'query', 'query':query})
+                        print(f'query for db: {query}')
+                        db.send(query.encode())
                 case(5):
                     #disconnect clients
                     tempConnections = []
@@ -436,8 +457,13 @@ def main():
                     #client_connection.send(networkPositions.keys.encode())
                 elif connection == db:
                     msg = connection.recv(2048)
-                    print(f'db sent:\n{msg}')
-                    #parse more of db output
+                    if not msg:
+                        connections.remove(connection)
+                        print(f'#######\nConnection to Database lost, reverting to csv output\n#######')
+                        db = None
+                    else:
+                        print(msg.decode())
+                        #parse more of db output
                 else:
                     msg = connection.recv(2048)
                     msg = decrypt(msg,aesKey,aesIV)
@@ -471,8 +497,18 @@ def main():
                         # src = ip
                         result = order_data(hashed_mac, ip, (rssi, timestamp, pt, n, loc), args.knownLocation)
                         if result:
-                            print(f'send to DB:\n{result[0]}\n\n{result[1]}')
-                            # db.send(result)
+                            print(f'Insert to DB:\n{result}')
+                            if db:
+                                db.send(result.encode())
+                            else:
+                                result = json.loads(result)
+                                resultRow = pd.DataFrame([result])
+                                dbBackup = pd.concat([dbBackup, resultRow], ignore_index=True)
+                                if dbBackup.shape[0] > 1000:
+                                    outputDFCSV(dbBackup, 'wallfly.csv')
+                                    dbBackup = pd.DataFrame()
+                                
+
                         # row = pd.DataFrame({'mac':[hashed_mac], 'rssi':[rssi], 'time':[timestamp], 'ip':[src]})
                         # inputSet = pd.concat([inputSet,row], ignore_index=True)
             pass
