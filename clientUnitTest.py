@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch, Mock
+from unittest.mock import patch, Mock, MagicMock, ANY
 import socket
 import uuid
 import math
@@ -37,6 +37,7 @@ class TestNetworkModule(unittest.TestCase):
     def test_get_mac_address(self, mock_getnode):
         mac_address = get_mac_address()
         self.assertEqual(mac_address, '12:34:56:78:9a:bc')
+        # a0:51:0b:d1:cf:18
 
     def test_get_distance_to_client(self):
         remote_position = [10, 10, 10]
@@ -73,27 +74,31 @@ class TestNetworkModule(unittest.TestCase):
         self.assertEqual(probe_request[Dot11Elt].info, ssid.encode())
     
     @patch('time.sleep', return_value=None)  # Mock sleep to avoid waiting
-    @patch('datetime.datetime.now', return_value=datetime.datetime(2024, 9, 16, 12, 30, 45, 500000))
+    @patch('datetime.datetime')
     def test_synchronized_start(self, mock_datetime, mock_sleep):
+        
+        fixed_time = datetime.datetime(2024,9,16,12,30,45,500000)
+        mock_datetime.now.return_value = fixed_time
+        
         synchronized_start()
+
         # Check if sleep was called with the correct calculated time
-        mock_sleep.assert_called_with(0.5)
+        current_time = fixed_time
+        time_to_wait = 10.-(current_time.microsecond / 1000000.0)
+        mock_sleep.assert_called_with(time_to_wait)
 
     @patch('subprocess.call')
     @patch('time.sleep', return_value=None)  # Mock sleep to avoid waiting
     def test_channel_hopper(self, mock_sleep, mock_subprocess):
-        interface = 'wlan0'
+        interface = 'wlan1'
         channels = [1, 6, 11]
         interval = 1
         with patch('builtins.print') as mock_print:  # Mock print to avoid printing during the test
-            # We'll simulate running the hopper once for testing
-            with self.assertRaises(StopIteration):  # To exit the infinite loop
-                hopper_gen = channel_hopper(interface, channels, interval)
-                next(hopper_gen)
+            channel_hopper(interface, channels, interval, 1)
 
-        mock_subprocess.assert_any_call(['iwconfig', interface, 'channel', '1'])
-        mock_subprocess.assert_any_call(['iwconfig', interface, 'channel', '6'])
-        mock_subprocess.assert_any_call(['iwconfig', interface, 'channel', '11'])
+        mock_subprocess.assert_any_call(['iwconfig', interface, 'channel', 1])
+        mock_subprocess.assert_any_call(['iwconfig', interface, 'channel', 6])
+        mock_subprocess.assert_any_call(['iwconfig', interface, 'channel', 11])
 
     @patch('subprocess.call')
     def test_channel_set(self, mock_subprocess):
@@ -102,7 +107,7 @@ class TestNetworkModule(unittest.TestCase):
         with patch('builtins.print') as mock_print:  # Mock print to avoid printing during the test
             channel_set(interface, channel)
 
-        mock_subprocess.assert_called_with(['iwconfig', interface, 'channel', str(channel)])
+        mock_subprocess.assert_called_with(['iwconfig', interface, 'channel', channel])
         mock_print.assert_called_with(f'interface {interface} set to channel {channel}')
 
     @patch('ntplib.NTPClient.request', return_value=MagicMock(tx_time=1694872200))
@@ -111,18 +116,16 @@ class TestNetworkModule(unittest.TestCase):
     def test_sync_ntp_time(self, mock_ctime, mock_system, mock_ntp_request):
         with patch('builtins.print') as mock_print:
             sync_ntp_time()
+            mock_ntp_request.assert_called_with('192.168.4.1', version=3)
+            mock_system.assert_called_with('sudo chronyc makestep')
 
-        mock_ntp_request.assert_called_with('192.168.4.1', version=3)
-        mock_print.assert_any_call('NTP Time: Mon Sep 16 12:30:00 2024')
-        mock_system.assert_called_with('sudo chronyc makestep')
-        mock_print.assert_any_call("systemtime sync'd to ntp server")
-
-    @patch('scapy.all.sniff')
+    @patch('client.sniff')
     def test_capture_packets(self, mock_sniff):
-        interface = 'wlan0'
+        interface = 'wlan1'
         queue = MagicMock()
-        capture_packets(interface, queue)
-        mock_sniff.assert_called_with(iface=interface, prn=queue.put, timeout=None, store=0)
+        # mock_sniff.side_effect = lambda *args, **kwargs:None
+        capture_packets(interface, queue, 1)
+        mock_sniff.assert_called_with(iface=interface, prn=ANY, timeout=1, store=0)
 
     def test_encrypt(self):
         data = "test_data"

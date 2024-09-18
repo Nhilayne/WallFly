@@ -74,15 +74,18 @@ def parse_packet(pkt, filter, pt, n,location):
         if filter and mac_addr.upper() != filter.upper():
             return None
         data = (f'{mac_addr}|{rssi}|{pkt.time}|{pt}|{n}|{location}')
-        for key, value in networkStrength.items():
-            # print(f'checking {mac_addr} against listed {key}')
-            if mac_addr.upper() == key.upper():
-                # temp = networkStrength[key][1]
-                networkStrength[key][1] = rssi
-                # print(f'updated {key} from {temp} to {networkStrength[key][1]}')
-                # print(f'result:{networkStrength}')
-                return
-            # data += (f'|{value}')
+        try:
+            for key, value in networkStrength.items():
+                # print(f'checking {mac_addr} against listed {key}')
+                if mac_addr.upper() == key.upper():
+                    # temp = networkStrength[key][1]
+                    networkStrength[key][1] = rssi
+                    # print(f'updated {key} from {temp} to {networkStrength[key][1]}')
+                    # print(f'result:{networkStrength}')
+                    return
+                # data += (f'|{value}')
+        except NameError:
+            return data
         # print(data)
         return data
 
@@ -105,8 +108,6 @@ def create_probe_request(ssid, id):
 
     return probe_request
 
-def close():
-    pass
 
 #channel sync
 ####
@@ -115,12 +116,18 @@ def synchronized_start():
     timeToWait = 1.0 - (currentTime.microsecond / 1000000.0)
     time.sleep(timeToWait)
 
-def channel_hopper(interface, channels, interval):
+def channel_hopper(interface, channels, interval, max=None):
     print(f'interface {interface} hopping channels {channels} every {interval} seconds')
+    iterations = 1
     while True:
         for channel in channels:
             subprocess.call(['iwconfig',interface,'channel',channel])
             time.sleep(interval)
+        if max and iterations >= max:
+            return
+        elif max:
+            iterations += 1
+            
 
 def channel_set(interface, channel):
     subprocess.call(['iwconfig',interface,'channel',channel])
@@ -140,11 +147,11 @@ def sync_ntp_time(ntpServer='192.168.4.1'):
 
 #sniffing
 ####
-def capture_packets(interface, queue):
+def capture_packets(interface, queue, timeout=None):
     def packet_handler(packet):
         queue.put(packet)
     
-    sniff(iface=interface, prn=packet_handler, timeout=None, store=0)
+    sniff(iface=interface, prn=packet_handler, timeout=timeout, store=0)
 
 def encrypt(data, key, iv):
     # print(f'encoding {data}')
