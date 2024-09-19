@@ -32,6 +32,7 @@ class TestNetworkModule(unittest.TestCase):
         conn = init_connection(server, port)
         mock_connect.assert_called_with((server, port))
         self.assertIsInstance(conn, socket.socket)
+        conn.close()
 
     @patch('uuid.getnode', return_value=0x123456789ABC)
     def test_get_mac_address(self, mock_getnode):

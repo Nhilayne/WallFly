@@ -38,23 +38,13 @@ class TestWallflyServer(unittest.TestCase):
 
         # Check if the database connection was made
         mock_connect.assert_called_once_with('wallfly.db')
-
         # Check if the tables were created
         mock_cursor.execute.assert_any_call('''CREATE TABLE IF NOT EXISTS tracking (
-                                                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                                    MAC TEXT NOT NULL,
-                                                    Location TEXT,
-                                                    timestamp DATETIME
-                                                )''')
-        mock_cursor.execute.assert_any_call('''CREATE TABLE IF NOT EXISTS originaldata (
-                                                    id INTEGER,
-                                                    rssi1 INTEGER, rssi2 INTEGER, rssi3 INTEGER,
-                                                    pt1 REAL, pt2 REAL, pt3 REAL,
-                                                    n1 REAL, n2 REAL, n3 REAL,
-                                                    loc1 TEXT, loc2 TEXT, loc3 TEXT, rssiloc TEXT,
-                                                    FOREIGN KEY(id) REFERENCES table1(id)
-                                                )''')
-
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        MAC TEXT NOT NULL,
+                        Location TEXT,
+                        timestamp DATETIME
+                      )''')
         # Check if commit was called
         mock_connection.commit.assert_called_once()
 

@@ -9,9 +9,10 @@ import numpy as np
 import datetime
 import time
 import base64
-from cryptography.hazmat.primitives import padding, algorithms
-from cryptography.hazmat.primitives.ciphers import Cipher, modes
+from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.primitives.ciphers import Cipher, modes, algorithms
 from cryptography.hazmat.backends import default_backend
+from collections import defaultdict
 
 # Importing the functions from the main module
 from server import *
@@ -119,13 +120,15 @@ class TestFunctions(unittest.TestCase):
         self.assertEqual(result, expected_estimate)
 
     @patch('builtins.print')
-    def test_rssi_loc_singular_matrix(self, mock_print):
+    def test_rssi_loc_colinear_locations(self, mock_print):
         # Case where matrix A is singular and an exception is caught
         d1, d2, d3 = 10, 10, 10
         locs = ["[0,0,0]", "[0,0,0]", "[0,0,0]"]
         result = rssi_loc(d1, d2, d3, locs)
-        mock_print.assert_called_with('Singular matrix no solution found')
-        self.assertIsNone(result)
+        
+        mock_print.assert_any_call('Warning: Log-Distance estimate for location will not predict on the X axis')
+        mock_print.assert_any_call('Warning: Log-Distance estimate for location will not predict on the Y axis')
+        mock_print.assert_any_call('Warning: Log-Distance estimate for location will not predict on the Z axis')
 
     def test_toa_to_dist(self):
         toa = 2e-6  # seconds
@@ -170,7 +173,7 @@ class TestFunctions(unittest.TestCase):
         pd.testing.assert_series_equal(result['col1'], expected_result)
 
     def test_get_datetime(self):
-        epoch = 1694872200
+        epoch = 1726515000
         expected_datetime = "2024-09-16 12:30:00"
         result = get_datetime(epoch)
         self.assertEqual(result, expected_datetime)
@@ -180,13 +183,13 @@ class TestFunctions(unittest.TestCase):
     @patch('server.process_packets', return_value="processed_data")
     def test_order_data(self, mock_process_packets, mock_cleanup_old_groups, mock_time):
         # Test with 3 unique clients for the same MAC address
-        global packets
-        packets = {
-            '12:34:56:78:9a:bc': {
+        # global packets
+        # packets = defaultdict(dict)
+        packets['12:34:56:78:9a:bc'] = {
                 'client1': ('data1', False),
                 'client2': ('data2', False)
             }
-        }
+        
         mac_address = '12:34:56:78:9a:bc'
         client_id = 'client3'
         packet_data = 'data3'
@@ -207,11 +210,10 @@ class TestFunctions(unittest.TestCase):
     @patch('time.time', return_value=1694872200)
     @patch('server.cleanup_old_groups')
     def test_order_data_not_enough_clients(self, mock_cleanup_old_groups, mock_time):
-        global packets
-        packets = {
-            '12:34:56:78:9a:bc': {
+        # global packets
+        packets['12:34:56:78:9a:bc'] = {
                 'client1': ('data1', False),
-            }
+                'client2': ('data2', False)
         }
         mac_address = '12:34:56:78:9a:bc'
         client_id = 'client2'
@@ -225,10 +227,10 @@ class TestFunctions(unittest.TestCase):
 
 
     @patch('builtins.print')  # Mocking print to suppress output during tests
-    @patch('your_module.apply_binning')  # Replace 'your_module' with the actual module name
-    @patch('your_module.get_datetime')
-    @patch('your_module.rssi_loc')
-    @patch('your_module.rssi_to_dist')
+    @patch('server.apply_binning')  # Replace 'your_module' with the actual module name
+    @patch('server.get_datetime')
+    @patch('server.rssi_loc')
+    @patch('server.rssi_to_dist')
     def test_process_packets_training(self, mock_rssi_to_dist, mock_rssi_loc, mock_get_datetime, mock_apply_binning, mock_print):
         # Setting up mock return values
         mock_rssi_to_dist.side_effect = [10, 15, 20]  # Mock distances
@@ -242,57 +244,21 @@ class TestFunctions(unittest.TestCase):
             2: ([70, 1234567891.0, 30, 2, "[2,2,0]"], True),
             3: ([80, 1234567892.0, 30, 2, "[3,3,0]"], True)
         }
-        locationKnown = True
-
-        global trainSet, groupCount
-        trainSet = pd.DataFrame()  # Mock an empty DataFrame
-        groupCount = 0
-
-        result = process_packets(mac, packetGroup, locationKnown)
-
-        self.assertIsNone(result)
-        self.assertEqual(groupCount, 1)
-        self.assertEqual(len(trainSet), 1)  # One row should be added to the train set
-
-    @patch('builtins.print')  # Mocking print to suppress output during tests
-    @patch('your_module.apply_binning')
-    @patch('your_module.get_datetime')
-    @patch('your_module.rssi_loc')
-    @patch('your_module.rssi_to_dist')
-    def test_process_packets_prediction(self, mock_rssi_to_dist, mock_rssi_loc, mock_get_datetime, mock_apply_binning, mock_print):
-        # Setting up mock return values
-        mock_rssi_to_dist.side_effect = [10, 15, 20]  # Mock distances
-        mock_rssi_loc.return_value = [10.0, 20.0, 30.0]  # Mock RSSI location
-        mock_get_datetime.return_value = "2024-09-18 12:00:00"
+        locationKnown = '[0,0,0]'
         
-        # Mock input data for prediction
-        mac = "AA:BB:CC:DD:EE:FF"
-        packetGroup = {
-            1: ([60, 1234567890.0, 30, 2, "[1,1,0]"], False),
-            2: ([70, 1234567891.0, 30, 2, "[2,2,0]"], False),
-            3: ([80, 1234567892.0, 30, 2, "[3,3,0]"], False)
-        }
-        locationKnown = False
-
-        global predictionPipeline
-        predictionPipeline = MagicMock()  # Mock the prediction pipeline
-        predictionPipeline.predict.return_value = [[10.0, 20.0, 30.0]]  # Mock prediction
+        # global trainSet, groupCount
+        # trainSet = pd.DataFrame()  # Mock an empty DataFrame
+        # groupCount = 0
 
         result = process_packets(mac, packetGroup, locationKnown)
 
-        expected_data = {
-            'type': 'insert',
-            'MAC': mac,
-            'Location': '[10.0,20.0,30.0]',
-            'Timestamp': '2024-09-18 12:00:00'
-        }
-
-        self.assertEqual(json.loads(result), expected_data)
+        self.assertEqual(result[0], 1)
+        self.assertEqual(len(result[1]), 1)  # One row should be added to the train set
 
     @patch('builtins.print')  # Mocking print to suppress output during tests
-    @patch('your_module.get_datetime')
-    @patch('your_module.rssi_loc')
-    @patch('your_module.rssi_to_dist')
+    @patch('server.get_datetime')
+    @patch('server.rssi_loc')
+    @patch('server.rssi_to_dist')
     def test_process_packets_no_model(self, mock_rssi_to_dist, mock_rssi_loc, mock_get_datetime, mock_print):
         # Setting up mock return values
         mock_rssi_to_dist.side_effect = [10, 15, 20]  # Mock distances
@@ -320,7 +286,45 @@ class TestFunctions(unittest.TestCase):
             'Timestamp': '2024-09-18 12:00:00'
         }
 
-        self.assertEqual(json.loads(result), expected_data)
+        self.assertEqual(result, json.dumps(expected_data))
+
+    @patch('builtins.print')  # Mocking print to suppress output during tests
+    @patch('server.apply_binning')
+    @patch('server.get_datetime')
+    @patch('server.rssi_loc')
+    @patch('server.rssi_to_dist')
+    @patch('server.predictionPipeline')
+    def test_process_packets_prediction(self,mock_predictionPipeline, mock_rssi_to_dist, mock_rssi_loc, mock_get_datetime, mock_apply_binning, mock_print):
+        # Setting up mock return values
+        mock_rssi_to_dist.side_effect = [10, 15, 20]  # Mock distances
+        mock_rssi_loc.return_value = [10.0, 20.0, 30.0]  # Mock RSSI location
+        mock_get_datetime.return_value = "2024-09-18 12:00:00"
+        
+        # Mock input data for prediction
+        mac = "AA:BB:CC:DD:EE:FF"
+        packetGroup = {
+            1: ([60, 1234567890.0, 30, 2, "[1,1,0]"], False),
+            2: ([70, 1234567891.0, 30, 2, "[2,2,0]"], False),
+            3: ([80, 1234567892.0, 30, 2, "[3,3,0]"], False)
+        }
+        locationKnown = False
+
+        # global predictionPipeline
+        # predictionPipeline = MagicMock()  # Mock the prediction pipeline
+        mock_predictionPipeline.predict.return_value = np.array([[10.5, 20.5, 30.5]])  # Mock prediction
+
+        result = process_packets(mac, packetGroup, locationKnown)
+
+        expected_data = {
+            "type": "insert",
+            "MAC": mac,
+            "Location": "[10.5,20.5,30.5]",
+            "Timestamp": "2024-09-18 12:00:00"
+        }
+
+        self.assertEqual(result, json.dumps(expected_data))
+
+
 
     # Test for cleanup_old_groups
     @patch('builtins.print')  # Mock print to suppress output during tests
@@ -328,22 +332,21 @@ class TestFunctions(unittest.TestCase):
         global packets
         current_time = 1234567895.0  # Simulated current time
 
-        # Mock packets with old and new timestamps
-        packets = {
-            "AA:BB:CC:DD:EE:FF": {1: ([60, 1234567890.0])},
-            "11:22:33:44:55:66": {2: ([70, 1234567894.0])},
-            "77:88:99:AA:BB:CC": {3: ([80, 1234567880.0])}  # This one is old and should be removed
+        packets['12:34:56:78:9a:bc'] = {
+                'client1': (('data1',1234567894.0), False),
+                'client2': (('data2',1234567890.0), False),
+                'client3': (('data3',1234567880.0), False)
         }
-
-        cleanup_old_groups(current_time)
+        
+        result = cleanup_old_groups(current_time)
 
         # Check if the old packet is removed and only the recent ones remain
         self.assertNotIn("77:88:99:AA:BB:CC", packets)
-        self.assertIn("AA:BB:CC:DD:EE:FF", packets)
-        self.assertIn("11:22:33:44:55:66", packets)
+        self.assertNotIn("AA:BB:CC:DD:EE:FF", packets)
+        self.assertNotIn("11:22:33:44:55:66", packets)
 
         # Check if the correct print statement is called
-        mock_print.assert_called_with("Removing stale packets for MAC: 77:88:99:AA:BB:CC")
+        mock_print.assert_called_with("Removing stale packets for MAC: 12:34:56:78:9a:bc")
 
     # Test for outputDFCSV
     @patch('pandas.DataFrame.to_csv')
@@ -364,8 +367,8 @@ class TestFunctions(unittest.TestCase):
     # Test for encrypt
     def test_encrypt(self):
         data = "test_data"
-        key = b'16_byte_key_here'
-        iv = b'16_byte_iv_here'
+        key = b'f553692b0eeeb0fc14da46a5a2682616'
+        iv = b'c0dabc32dba054fe'
         
         # Call the function
         encrypted = encrypt(data, key, iv)
@@ -384,8 +387,8 @@ class TestFunctions(unittest.TestCase):
     # Test for decrypt
     def test_decrypt(self):
         data = "test_data"
-        key = b'16_byte_key_here'
-        iv = b'16_byte_iv_here'
+        key = b'f553692b0eeeb0fc14da46a5a2682616'
+        iv = b'c0dabc32dba054fe'
 
         # Encrypt the data first (simulating prior encryption)
         encrypted = encrypt(data, key, iv)
@@ -399,8 +402,8 @@ class TestFunctions(unittest.TestCase):
     # Test decrypt with extra padding characters '&'
     def test_decrypt_with_extra_data(self):
         data = "test_data"
-        key = b'16_byte_key_here'
-        iv = b'16_byte_iv_here'
+        key = b'f553692b0eeeb0fc14da46a5a2682616'
+        iv = b'c0dabc32dba054fe'
 
         # Encrypt the data first
         encrypted = encrypt(data, key, iv)

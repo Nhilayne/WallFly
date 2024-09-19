@@ -25,7 +25,7 @@ def setup_db():
     db = sqlite3.connect('wallfly.db')
     cursor = db.cursor()
 
-    # Create Table 1
+    # create table for tracking if missing
     cursor.execute('''CREATE TABLE IF NOT EXISTS tracking (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         MAC TEXT NOT NULL,
@@ -33,15 +33,14 @@ def setup_db():
                         timestamp DATETIME
                       )''')
 
-    # Create Table 2
-    cursor.execute('''CREATE TABLE IF NOT EXISTS originaldata (
-                        id INTEGER,
-                        rssi1 INTEGER, rssi2 INTEGER, rssi3 INTEGER,
-                        pt1 REAL, pt2 REAL, pt3 REAL,
-                        n1 REAL, n2 REAL, n3 REAL,
-                        loc1 TEXT, loc2 TEXT, loc3 TEXT, rssiloc TEXT,
-                        FOREIGN KEY(id) REFERENCES table1(id)
-                      )''')
+    # cursor.execute('''CREATE TABLE IF NOT EXISTS originaldata (
+    #                     id INTEGER,
+    #                     rssi1 INTEGER, rssi2 INTEGER, rssi3 INTEGER,
+    #                     pt1 REAL, pt2 REAL, pt3 REAL,
+    #                     n1 REAL, n2 REAL, n3 REAL,
+    #                     loc1 TEXT, loc2 TEXT, loc3 TEXT, rssiloc TEXT,
+    #                     FOREIGN KEY(id) REFERENCES table1(id)
+    #                   )''')
 
     db.commit()
     return db

@@ -25,6 +25,12 @@ import json
 # iv
 #c0dabc32dba054feba4d60c24e7fa50b
 ##################
+# globals
+packets = defaultdict(dict) 
+trainSet = pd.DataFrame()
+groupCount = 0
+predictionPipeline = None
+##################
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -78,6 +84,8 @@ def menu(cmd):
         if choice == 4:
             query = input()
         # break
+    else:
+        choice = None
     # print('Please enter a valid number')
 
     return choice, query
@@ -99,6 +107,13 @@ def rssi_loc(d1,d2,d3,locs):
     x2,y2,z2 = loc2
     x3,y3,z3 = loc3
 
+    if x1 ==x2 == x3:
+        print('Warning: Log-Distance estimate for location will not predict on the X axis')
+    if y1 ==y2 == y3:
+        print('Warning: Log-Distance estimate for location will not predict on the Y axis')
+    if z1 ==z2 == z3:
+        print('Warning: Log-Distance estimate for location will not predict on the Z axis')
+
     A = np.array([
         [2*(x2-x1),2*(y2-y1),2*(z2-z1)],
         [2*(x3-x1),2*(y3-y1),2*(z3-z1)],
@@ -109,10 +124,9 @@ def rssi_loc(d1,d2,d3,locs):
         d1**2 - d3**2 + x3**2 - x1**2 + y3**2 - y1**2 + z3**2 - z1**2,
     ])
 
-    try:
-        estimate = np.linalg.pinv(A).dot(B).tolist()
-    except np.linalg.LinAlgError:
-        print('Singular matrix no solution found')
+    
+    estimate = np.linalg.pinv(A).dot(B).tolist()
+   
     
     return estimate
 
@@ -158,6 +172,7 @@ def get_datetime(epoch):
     return dt.strftime('%Y-%m-%d %H:%M:%S')
 
 def order_data(mac_address, client_id, packet_data, locationKnown=False):
+    global packets
     current_time = time.time()
     processed = None
     # Add or update packet data with timestamp for the specific client
@@ -169,6 +184,9 @@ def order_data(mac_address, client_id, packet_data, locationKnown=False):
 
     # After adding the packet, check and clean up old groups
     cleanup_old_groups(current_time)
+
+    if processed is type(tuple):
+        return
 
     return processed
 
@@ -185,7 +203,7 @@ def process_packets(mac, packetGroup, locationKnown):
     loc_cols = ['loc1', 'loc2', 'loc3']
 
     firstTimeFound = float(packetGroup[keys[0]][0][1])
-    print(f'firstTime: {firstTimeFound}')
+    # print(f'firstTime: {firstTimeFound}')
     
     # for i in range(len(keys)):
     #     print(i)
@@ -215,7 +233,7 @@ def process_packets(mac, packetGroup, locationKnown):
 
     # # packetGroupDF['ToALoc'] = toa_loc()
     # packetGroupDF['TrueLoc'] = locationKnown
-
+    
     if locationKnown:
         # building a training set
         global trainSet
@@ -224,12 +242,12 @@ def process_packets(mac, packetGroup, locationKnown):
         packetGroupDF['TrueLoc'] = locationKnown
         trainSet = pd.concat([trainSet, packetGroupDF], ignore_index=True)
         print(f'packet groups found: {groupCount}')
-        return None
+        return (groupCount, trainSet)
     else:
         # actually make location prediction
         print('#############################################')
         print(f"Created packet group for {mac}")
-        global predictionPipeline
+        # global predictionPipeline
         
         predictDF = packetGroupDF
 
@@ -255,16 +273,16 @@ def process_packets(mac, packetGroup, locationKnown):
         predictDF = apply_binning(predictDF, ['rssi1', 'rssi2', 'rssi3'], rssiBins)
 
         predictDF = predictDF.drop(columns=['loc1', 'loc2', 'loc3', 'RSSILoc'])
-        
+        # return predictionPipeline
         if predictionPipeline:
             # pipeline will handle scaling, polynomial features, PCA, and the model prediction
             predictions = predictionPipeline.predict(predictDF)
             # predictions = np.array_str(predictions[0])
         else:
             # no model found, use base log-distance calc
-            predictions = rssiLoc
+            predictions = [rssiLoc]
         
-        print(predictions[0])
+        print(predictions)
 
         timestamp = get_datetime(firstTimeFound)
 
@@ -276,15 +294,16 @@ def process_packets(mac, packetGroup, locationKnown):
 
 def cleanup_old_groups(current_time):
     to_remove = []
+    # return (packets.items())
     for mac_address, client_packets in packets.items():
         # Get the timestamp of the oldest packet in the group
         oldest_timestamp = min(float(data[0][1]) for data in client_packets.values())
         # print(f'values {client_packets.values()}')
         # print(f'oldest time is {oldest_timestamp}')
+        # return oldest_timestamp
         
-        if current_time - oldest_timestamp > 5:
+        if current_time - oldest_timestamp > 10:
             to_remove.append(mac_address)
-
     for mac_address in to_remove:
         print(f"Removing stale packets for MAC: {mac_address}")
         del packets[mac_address]
@@ -316,6 +335,7 @@ def decrypt(data, key, iv):
         done = done.split(b'&')[0]
     return done.decode()
 
+
 def main():
 
     args = get_args()
@@ -338,15 +358,15 @@ def main():
     aesKey = b'f553692b0eeeb0fc14da46a5a2682616'#48
     aesIV = b'c0dabc32dba054fe'#32
 
-    global packets
-    packets = defaultdict(dict)  # For storing packets by MAC and client
-    global AGE_LIMIT
-    AGE_LIMIT = 10  # seconds
+    # global packets
+    # packets = defaultdict(dict)  # For storing packets by MAC and client
+    # global AGE_LIMIT
+    # AGE_LIMIT = 10  # seconds
 
-    global trainSet
-    trainSet = pd.DataFrame()
-    global groupCount
-    groupCount = 0
+    # global trainSet
+    # trainSet = pd.DataFrame()
+    # global groupCount
+    # groupCount = 0
 
     global predictionPipeline
     try:
@@ -354,7 +374,7 @@ def main():
         print('Prediction model loaded successfully')
     except FileNotFoundError as e:
         print(f'Predictive model file not found: {e}\nLog-Distance estimation will be used')
-        predictionPipeline = None
+        # predictionPipeline = None
     
     dbBackup = pd.DataFrame()
 
