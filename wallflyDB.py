@@ -80,6 +80,7 @@ def handle_query(db, query):
         results = cursor.fetchall()
         return json.dumps(results)  # Send results back as JSON
     except sqlite3.Error as e:
+        print('sqlite error in query')
         return json.dumps({"error": str(e)})
 
 # Handle each client connection
@@ -87,13 +88,16 @@ def handle_client(request, db):
     try:
         # request = client_socket.recv(1024).decode('utf-8')
         data = json.loads(request)
+        # print(data)
 
         if data.get("type") == "insert":
+            # print('inserting')
             # Handle insert data
             insert_data(db, data)
             # client_socket.send(b"Data received and inserted successfully.")
             response = 'Data received and inserted successfully.'
         elif data.get("type") == "query":
+            # print('querying')
             # Handle SQL query
             query = data.get("query")
             # print(f'QUERY: {query}')
@@ -104,7 +108,6 @@ def handle_client(request, db):
                 # client_socket.send(b"Invalid query format.")
                 response = 'invalid query format'
         else:
-            pass
             # client_socket.send(b"Unknown request type.")
             response = 'unsupported request type'
     except Exception as e:
@@ -145,8 +148,14 @@ def main():
                     if not msg:
                         connections.remove(connection)
                     else:
-                        response = handle_client(msg, db)
-                        connection.send(response.encode())
+                        # print(msg)
+                        batch = msg.split('&')
+                        for x in batch:
+                            if not x:
+                                continue
+                            # print(f'x in batch: {x}')
+                            response = handle_client(x, db)
+                            connection.send(response.encode())
         except KeyboardInterrupt:
             print(f'\nForce close detected, shutting down')
             server.close()

@@ -72,12 +72,13 @@ def parse_packet(pkt, filter, pt, n,location):
         # devices.add(mac_addr)
         # print(pkt)
         if filter and mac_addr.upper() != filter.upper():
+            # print(f'{filter} {mac_addr}')
             return None
         data = (f'{mac_addr}|{rssi}|{pkt.time}|{pt}|{n}|{location}')
         try:
             for key, value in networkStrength.items():
                 # print(f'checking {mac_addr} against listed {key}')
-                if mac_addr.upper() == key.upper():
+                if not filter and mac_addr.upper() == key.upper():
                     # temp = networkStrength[key][1]
                     networkStrength[key][1] = rssi
                     # print(f'updated {key} from {temp} to {networkStrength[key][1]}')
@@ -156,12 +157,13 @@ def capture_packets(interface, queue, timeout=None):
 def encrypt(data, key, iv):
     # print(f'encoding {data}')
     data += '&'
-    padder = padding.PKCS7(algorithms.AES.block_size).padder()
-    padded_data = padder.update(data.encode()) + padder.finalize()
+    data = data.encode('utf-8')
+    # padder = padding.PKCS7(algorithms.AES.block_size).padder()
+    # padded_data = padder.update(data.encode()) + padder.finalize()
     # data = data.encode()
     cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
     encryptor = cipher.encryptor()
-    ciphertext = encryptor.update(padded_data) + encryptor.finalize()
+    ciphertext = encryptor.update(data) + encryptor.finalize()
     return base64.b64encode(ciphertext)
 
 def decrypt(data, key, iv):
@@ -169,13 +171,13 @@ def decrypt(data, key, iv):
     cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
     decryptor = cipher.decryptor()
     decrypted = decryptor.update(ciphertext) + decryptor.finalize()
-    unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
-    done = unpadder.update(decrypted) + unpadder.finalize()
+    # unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
+    # done = unpadder.update(decrypted) + unpadder.finalize()
     # print(f'decrp: {done}')
-    if b'&' in done:
+    if b'&' in decrypted:
         # print(f'possible oversend found, trimming')
-        done = done.split(b'&')[0]
-    return done.decode()
+        decrypted = decrypted.split(b'&')[0]
+    return decrypted.decode()
 
 def main():
 
@@ -260,6 +262,8 @@ def main():
 
     sendp(probeFrame, iface=args.interface, verbose=False)
 
+    loadCount = 0
+
     print('starting')
     while True:
         try:
@@ -275,6 +279,7 @@ def main():
                 if not data:
                     print('Server connection closed')
                     conn.close()
+                    print(loadCount)
                     exit()
                 # else:
                 #     data = decrypt(data,aesKey,aesIV)
@@ -311,6 +316,7 @@ def main():
                 pkt = send_buffer.get()
                 data = parse_packet(pkt, args.knownMAC, args.ptValue, args.nValue,location)
                 if data:
+                    loadCount+=1
                     # data += (f'|{args.ptValue}|{args.nValue}')
                     # conn.sendall(data.encode())
                     conn.sendall(encrypt(data,aesKey,aesIV))

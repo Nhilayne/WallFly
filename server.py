@@ -51,7 +51,7 @@ def init_server(address, port):
 
 def connect_db(dbAddress, dbPort):
     if dbAddress is None or dbPort is None:
-        print("No database connection, only tracking results will be saved to wallfly.csv")
+        print("No database connection, tracking results will be saved to wallfly.csv")
         return None
     else:
         print(f"connecting to database at {dbAddress}:{dbPort}")
@@ -241,12 +241,12 @@ def process_packets(mac, packetGroup, locationKnown):
         groupCount += 1
         packetGroupDF['TrueLoc'] = locationKnown
         trainSet = pd.concat([trainSet, packetGroupDF], ignore_index=True)
-        print(f'packet groups found: {groupCount}')
+        # print(f'packet groups found: {groupCount}')
         return (groupCount, trainSet)
     else:
         # actually make location prediction
-        print('#############################################')
-        print(f"Created packet group for {mac}")
+        # print('#############################################')
+        # print(f"Created packet group for {mac}")
         # global predictionPipeline
         
         predictDF = packetGroupDF
@@ -275,20 +275,23 @@ def process_packets(mac, packetGroup, locationKnown):
         predictDF = predictDF.drop(columns=['loc1', 'loc2', 'loc3', 'RSSILoc'])
         # return predictionPipeline
         if predictionPipeline:
+            try:
             # pipeline will handle scaling, polynomial features, PCA, and the model prediction
-            predictions = predictionPipeline.predict(predictDF)
+                predictions = predictionPipeline.predict(predictDF)
+            except:
+                print(predictDF.tail(1))
             # predictions = np.array_str(predictions[0])
         else:
             # no model found, use base log-distance calc
             predictions = [rssiLoc]
         
-        print(predictions)
+        # print(predictions)
 
         timestamp = get_datetime(firstTimeFound)
 
         data = {'type':'insert','MAC': mac, 'Location': f'[{predictions[0][0]},{predictions[0][1]},{predictions[0][2]}]', 'Timestamp': timestamp}
-        print(data)
-        print('#############################################')
+        # print(data)
+        # print('#############################################')
         #packetGroupDF.to_json(orient='records')[1:-1]
         return json.dumps(data)
 
@@ -305,7 +308,7 @@ def cleanup_old_groups(current_time):
         if current_time - oldest_timestamp > 10:
             to_remove.append(mac_address)
     for mac_address in to_remove:
-        print(f"Removing stale packets for MAC: {mac_address}")
+        # print(f"Removing stale packets for MAC: {mac_address}")
         del packets[mac_address]
 
 def outputDFCSV(outputDF, filename):
@@ -314,12 +317,13 @@ def outputDFCSV(outputDF, filename):
 def encrypt(data, key, iv):
     # print(f'encoding {data}')
     data += '&'
-    padder = padding.PKCS7(algorithms.AES.block_size).padder()
-    padded_data = padder.update(data.encode()) + padder.finalize()
+    data = data.encode('utf-8')
+    # padder = padding.PKCS7(algorithms.AES.block_size).padder()
+    # padded_data = padder.update(data.encode()) + padder.finalize()
     # data = data.encode()
     cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
     encryptor = cipher.encryptor()
-    ciphertext = encryptor.update(padded_data) + encryptor.finalize()
+    ciphertext = encryptor.update(data) + encryptor.finalize()
     return base64.b64encode(ciphertext)
 
 def decrypt(data, key, iv):
@@ -327,13 +331,18 @@ def decrypt(data, key, iv):
     cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
     decryptor = cipher.decryptor()
     decrypted = decryptor.update(ciphertext) + decryptor.finalize()
-    unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
-    done = unpadder.update(decrypted) + unpadder.finalize()
+    # unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
+    # done = unpadder.update(decrypted) + unpadder.finalize()
     # print(f'decrp: {done}')
-    if b'&' in done:
+    if b'&' in decrypted:
         # print(f'possible oversend found, trimming')
-        done = done.split(b'&')[0]
-    return done.decode()
+        decrypted = decrypted.split(b'&')[0]
+    # print(decrypted)
+    try:
+        decrypted = decrypted.decode()
+    except UnicodeDecodeError:
+        return None
+    return decrypted
 
 
 def main():
@@ -378,6 +387,7 @@ def main():
     
     dbBackup = pd.DataFrame()
 
+    loadCount = 0
 
     ###############################
     # # calc distance between server and a client node
@@ -448,6 +458,7 @@ def main():
                         #convert to db format
                         query = json.dumps({'type': 'query', 'query':query})
                         print(f'query for db: {query}')
+                        query += '&'
                         db.send(query.encode())
                 case(5):
                     #disconnect clients
@@ -464,8 +475,10 @@ def main():
                 case(6):
                     #close out app
                     print('Server stopped')
+                    print(f'total recv {loadCount}')
                     for connection in connections:
                         connection.close()
+                    outputDFCSV(dbBackup, 'wallfly.csv')
                     outputDFCSV(trainSet, 'trainSet.csv')
                     exit()
             
@@ -482,14 +495,19 @@ def main():
                         print(f'#######\nConnection to Database lost, reverting to csv output\n#######')
                         db = None
                     else:
+                        # pass
                         print(msg.decode())
                         #parse more of db output
                 else:
-                    msg = connection.recv(2048)
-                    msg = decrypt(msg,aesKey,aesIV)
+                    msg = connection.recv(1024)
+                    
                     if not msg:
                         connections.remove(connection)
                     else:
+                        msg = decrypt(msg,aesKey,aesIV)
+                        if msg is None:
+                            continue
+                        
                         # msg=msg.decode()
                         # print(msg)
                         data = msg.split('|')
@@ -507,31 +525,38 @@ def main():
 
                         ip, _ = connection.getpeername()
                         # print(f'{ip} sent {data}')
-                        hashed_mac = privatize(data[0])
-                        rssi = data[1]
-                        timestamp = data[2]
-                        pt = data[3]
-                        n = data[4]
-                        loc = data[5]
+                        try:
+                            hashed_mac = privatize(data[0])
+                            rssi = data[1]
+                            timestamp = data[2]
+                            pt = data[3]
+                            n = data[4]
+                            loc = data[5]
+                        except IndexError:
+                            continue
                         # environment = data[5::]
                         # src = ip
+                        if rssi == 'None':
+                            rssi = 0
                         result = order_data(hashed_mac, ip, (rssi, timestamp, pt, n, loc), args.knownLocation)
                         if result:
-                            print(f'Insert to DB:\n{result}')
+                            # print(f'Insert to DB:\n{result}')
+                            
                             if db:
-                                db.send(result.encode())
+                                result += '&'
+                                db.sendall(result.encode())
                             else:
                                 result = json.loads(result)
                                 resultRow = pd.DataFrame([result])
+                                resultRow = resultRow.drop(columns=['type'])
                                 dbBackup = pd.concat([dbBackup, resultRow], ignore_index=True)
                                 if dbBackup.shape[0] > 1000:
                                     outputDFCSV(dbBackup, 'wallfly.csv')
                                     dbBackup = pd.DataFrame()
                                 
-
+                        loadCount+=1
                         # row = pd.DataFrame({'mac':[hashed_mac], 'rssi':[rssi], 'time':[timestamp], 'ip':[src]})
                         # inputSet = pd.concat([inputSet,row], ignore_index=True)
-            pass
             # process_set = getNext(input_set)
             # location = calcPosition(process_set)
             # storeLocation(location)
@@ -539,9 +564,10 @@ def main():
 
         except KeyboardInterrupt:
             print(f'\nForce close detected, shutting down gracefully')
-            server.close()
-            # print(inputSet.head(10))
-            # print(networkPositions.keys)
+            for connection in connections:
+                connection.close()
+            outputDFCSV(dbBackup, 'wallfly.csv')
+            outputDFCSV(trainSet, 'trainSet.csv')
             exit()
 
 
