@@ -29,6 +29,7 @@ import json
 packets = defaultdict(dict) 
 trainSet = pd.DataFrame()
 groupCount = 0
+distanceModel = None
 predictionPipeline = None
 ##################
 
@@ -107,12 +108,12 @@ def rssi_loc(d1,d2,d3,locs):
     x2,y2,z2 = loc2
     x3,y3,z3 = loc3
 
-    if x1 ==x2 == x3:
-        print('Warning: Log-Distance estimate for location will not predict on the X axis')
-    if y1 ==y2 == y3:
-        print('Warning: Log-Distance estimate for location will not predict on the Y axis')
-    if z1 ==z2 == z3:
-        print('Warning: Log-Distance estimate for location will not predict on the Z axis')
+    if x1 == x2 == x3:
+        print('Warning: Estimate for location will not predict on the X axis')
+    if y1 == y2 == y3:
+        print('Warning: Estimate for location will not predict on the Y axis')
+    if z1 == z2 == z3:
+        print('Warning: Estimate for location will not predict on the Z axis')
 
     A = np.array([
         [2*(x2-x1),2*(y2-y1),2*(z2-z1)],
@@ -126,7 +127,7 @@ def rssi_loc(d1,d2,d3,locs):
 
     
     estimate = np.linalg.pinv(A).dot(B).tolist()
-   
+    estimate = np.around(estimate, decimals=2).tolist()
     
     return estimate
 
@@ -195,6 +196,7 @@ def process_packets(mac, packetGroup, locationKnown):
     # print(f"Created packet group for {mac}: {packet_group}")
     # print(packetGroup)
     
+    predictions = None
 
     keys = list(packetGroup.keys())
     rssi_cols = ['rssi1', 'rssi2', 'rssi3']
@@ -261,29 +263,69 @@ def process_packets(mac, packetGroup, locationKnown):
             predictDF[[f'{col}_x', f'{col}_y', f'{col}_z']] = pd.DataFrame(predictDF[col].tolist(), index=predictDF.index)
 
         #  predictDF.apply(lambda row: rssi_to_dist(row['rssi1'], row['pt1'], row['n1']), axis=1)
-        predictDF['distance1'] = d1
-        predictDF['distance2'] = d2
-        predictDF['distance3'] = d3
+#######################
+        if distanceModel is None:
+            predictions = [rssiLoc]
+        else:
+            predictDF['distance1'] = predictDF.apply(lambda row: distanceModel.predict(pd.DataFrame({
+                'rssi': [row['rssi1']],
+                'pt': [row['pt1']],
+                'n': [row['n1']],
+                'rssidist': [d1]
+            }))[0], axis=1)
+            predictDF['distance2'] = predictDF.apply(lambda row: distanceModel.predict(pd.DataFrame({
+                'rssi': [row['rssi2']],
+                'pt': [row['pt2']],
+                'n': [row['n2']],
+                'rssidist': [d2]
+            }))[0], axis=1)
+            predictDF['distance3'] = predictDF.apply(lambda row: distanceModel.predict(pd.DataFrame({
+                'rssi': [row['rssi3']],
+                'pt': [row['pt3']],
+                'n': [row['n3']],
+                'rssidist': [d3]
+            }))[0], axis=1)
+#######################
+       
+            predictDF['locest'] = predictDF.apply(lambda row: rssi_loc(
+                row['distance1'], 
+                row['distance2'], 
+                row['distance3'], 
+                [(row['loc1_x'],row['loc1_y'],row['loc1_z']),
+                (row['loc2_x'],row['loc2_y'],row['loc2_z']),
+                (row['loc3_x'],row['loc3_y'],row['loc3_z'])
+                ]), axis=1)
+            
+            impLoc = predictDF.at[0,'locest']
+            
+            for col in ['locest']:
+                predictDF[col] = predictDF[col].apply(lambda x: x if isinstance(x, list) and len(x) == 3 else [0.0, 0.0, 0.0])
 
-        for col in ['rssi1', 'rssi2', 'rssi3']:
-            predictDF[col] = predictDF[col].apply(lambda x: int(x) )
+            for col in ['locest']:
+                predictDF[[f'{col}_x', f'{col}_y', f'{col}_z']] = pd.DataFrame(predictDF[col].tolist(), index=predictDF.index)
+#######################
+        # for col in ['rssi1', 'rssi2', 'rssi3']:
+        #     predictDF[col] = predictDF[col].apply(lambda x: int(x) )
 
 
-        rssiBins = [-100, -70, -65, -60, -55, -50, -45, -40, -35, -30, -25, -20, 0]
-        predictDF = apply_binning(predictDF, ['rssi1', 'rssi2', 'rssi3'], rssiBins)
+        # rssiBins = [-100, -70, -65, -60, -55, -50, -45, -40, -35, -30, -25, -20, 0]
+        # predictDF = apply_binning(predictDF, ['rssi1', 'rssi2', 'rssi3'], rssiBins)
 
-        predictDF = predictDF.drop(columns=['loc1', 'loc2', 'loc3', 'RSSILoc'])
+        # predictDF = predictDF.drop(columns=['loc1', 'loc2', 'loc3', 'RSSILoc'])
+        
         # return predictionPipeline
-        if predictionPipeline:
+        
+        if predictionPipeline and distanceModel:
+            X = predictDF.drop(columns=['rssi1','rssi2','rssi3','pt1','pt2','pt3','n1','n2','n3','locest'])
             try:
             # pipeline will handle scaling, polynomial features, PCA, and the model prediction
-                predictions = predictionPipeline.predict(predictDF)
+                predictions = predictionPipeline.predict(X)
             except:
-                print(predictDF.tail(1))
+                print(X.tail(1))
             # predictions = np.array_str(predictions[0])
-        else:
+        elif distanceModel:
             # no model found, use base log-distance calc
-            predictions = [rssiLoc]
+            predictions = [impLoc]
         
         # print(predictions)
 
@@ -377,12 +419,23 @@ def main():
     # global groupCount
     # groupCount = 0
 
+    global distanceModel
+    try:
+        distanceModel = joblib.load('distanceModel.pkl')
+        print('Distance model loaded successfully')
+    except FileNotFoundError as e:
+        print(f'Distance model not found: {e}\nPath-loss distance estimation will be used')
+    
     global predictionPipeline
     try:
         predictionPipeline = joblib.load('wallflyFitModel.pkl')
-        print('Prediction model loaded successfully')
+        
+        if distanceModel:
+            print('Location model loaded successfully')
+        else:
+            print('Missing Distance model, cannot align Location model:\n Matrix location estimation will be used')
     except FileNotFoundError as e:
-        print(f'Predictive model file not found: {e}\nLog-Distance estimation will be used')
+        print(f'Location model not found: {e}\nMatrix location estimation will be used')
         # predictionPipeline = None
     
     dbBackup = pd.DataFrame()
@@ -502,7 +555,16 @@ def main():
                     msg = connection.recv(1024)
                     
                     if not msg:
-                        connections.remove(connection)
+                        print(f'Lost Connection with {connection}, resetting...')
+                        for connection in connections:
+                            if connection != server and connection != db:
+                                print(f'closing {connection}')
+                                connection.close()
+                            else:
+                                tempConnections.append(connection)
+                        connections.clear()
+                        connections = tempConnections
+                        peerNum = 0
                     else:
                         msg = decrypt(msg,aesKey,aesIV)
                         if msg is None:
