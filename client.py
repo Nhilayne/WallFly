@@ -3,31 +3,17 @@ import argparse
 import select
 import math
 import time
-import struct
 from scapy.all import *
 import uuid
 import threading
 import subprocess
 import datetime
 import ntplib
-from time import ctime, sleep
 import os
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import padding
 import base64
 
-
-##################
-# aes 128 key
-#f553692b0eeeb0fc14da46a5a26826164511306cebf2b1ef
-# iv
-#c0dabc32dba054feba4d60c24e7fa50b
-# encrypted_message = encrypt(message, shared_key, iv)
-# encrypted_response = client_socket.recv(1024)
-# decrypted_response = decrypt(encrypted_response, shared_key, iv)
-# print(f"Decrypted: {decrypted_response.decode('utf-8')}")
-##################
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -52,8 +38,6 @@ def get_mac_address():
     return id_formatted.lower()
 
 def get_distance_to_client(remotePosition, localPosition):
-    # print(remotePosition)
-    # print(localPosition)
     position = [0,0,0]
     position[0] = remotePosition[0] - localPosition[0]
     position[1] = remotePosition[1] - localPosition[1]
@@ -69,33 +53,20 @@ def parse_packet(pkt, filter, pt, n,location):
         mac_addr = pkt.addr2
         mac_addr = mac_addr.upper()
         rssi = pkt.dBm_AntSignal
-        # devices.add(mac_addr)
-        # print(pkt)
         if filter and mac_addr.upper() != filter.upper():
-            # print(f'{filter} {mac_addr}')
             return None
         data = (f'{mac_addr}|{rssi}|{pkt.time}|{pt}|{n}|{location}')
         try:
             for key, value in networkStrength.items():
-                # print(f'checking {mac_addr} against listed {key}')
                 if not filter and mac_addr.upper() == key.upper():
-                    # temp = networkStrength[key][1]
                     networkStrength[key][1] = rssi
-                    # print(f'updated {key} from {temp} to {networkStrength[key][1]}')
-                    # print(f'result:{networkStrength}')
                     return
-                # data += (f'|{value}')
         except NameError:
             return data
-        # print(data)
         return data
 
 def create_probe_request(ssid, id):
-    # Generate a random MAC address for the source (optional)
-    # src_mac = ':'.join([f'{random.randint(0x00, 0xFF):02x}' for _ in range(6)])
     srcMAC = id
-
-    # Probe request frame creation
     probe_request = RadioTap() / \
                     Dot11(type=0, subtype=4, addr1="ff:ff:ff:ff:ff:ff", addr2=srcMAC, addr3="ff:ff:ff:ff:ff:ff") / \
                     Dot11ProbeReq() / \
@@ -104,14 +75,8 @@ def create_probe_request(ssid, id):
                     Dot11Elt(ID=3, info=chr(1)) / \
                     Dot11Elt(ID=50, info=b'\x0c\x12\x18\x24')
 
-    # Send the probe request
-    # sendp(probe_request, iface=interface, count=1, inter=0.1, verbose=1)
-
     return probe_request
 
-
-#channel sync
-####
 def synchronized_start():
     currentTime = datetime.datetime.now()
     timeToWait = 1.0 - (currentTime.microsecond / 1000000.0)
@@ -127,8 +92,7 @@ def channel_hopper(interface, channels, interval, max=None):
         if max and iterations >= max:
             return
         elif max:
-            iterations += 1
-            
+            iterations += 1    
 
 def channel_set(interface, channel):
     subprocess.call(['iwconfig',interface,'channel',channel])
@@ -138,7 +102,7 @@ def sync_ntp_time(ntpServer='192.168.4.1'):
     ntpClient = ntplib.NTPClient()
     try:
         response = ntpClient.request(ntpServer, version=3)
-        currentTime = ctime(response.tx_time)
+        currentTime = time.ctime(response.tx_time)
         print(f'NTP Time: {currentTime}')
 
         os.system(f'sudo chronyc makestep')
@@ -146,8 +110,6 @@ def sync_ntp_time(ntpServer='192.168.4.1'):
     except Exception as e:
         print(f'failed to sync time: {e}')
 
-#sniffing
-####
 def capture_packets(interface, queue, timeout=None):
     def packet_handler(packet):
         queue.put(packet)
@@ -155,12 +117,8 @@ def capture_packets(interface, queue, timeout=None):
     sniff(iface=interface, prn=packet_handler, timeout=timeout, store=0)
 
 def encrypt(data, key, iv):
-    # print(f'encoding {data}')
     data += '&'
     data = data.encode('utf-8')
-    # padder = padding.PKCS7(algorithms.AES.block_size).padder()
-    # padded_data = padder.update(data.encode()) + padder.finalize()
-    # data = data.encode()
     cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
     encryptor = cipher.encryptor()
     ciphertext = encryptor.update(data) + encryptor.finalize()
@@ -171,11 +129,7 @@ def decrypt(data, key, iv):
     cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
     decryptor = cipher.decryptor()
     decrypted = decryptor.update(ciphertext) + decryptor.finalize()
-    # unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
-    # done = unpadder.update(decrypted) + unpadder.finalize()
-    # print(f'decrp: {done}')
     if b'&' in decrypted:
-        # print(f'possible oversend found, trimming')
         decrypted = decrypted.split(b'&')[0]
     return decrypted.decode()
 
@@ -185,19 +139,15 @@ def main():
     
     clientID = get_mac_address()
 
-    aesKey = b'f553692b0eeeb0fc14da46a5a2682616'#48
-    aesIV = b'c0dabc32dba054fe'#32
+    aesKey = b'f553692b0eeeb0fc14da46a5a2682616'#32
+    aesIV = b'c0dabc32dba054fe'#16
 
-    #Force sync to ntp server
-    ####
     sync_ntp_time(args.server)
-    ####
 
     conn = init_connection(args.server,args.port)
     
     initMsg = f'init|{clientID}|{args.location}'
 
-    # conn.send(initMsg.encode())
     conn.send(encrypt(initMsg,aesKey,aesIV))
 
     location = args.location.strip('[')
@@ -208,21 +158,14 @@ def main():
     global send_buffer
     send_buffer = queue.Queue()
 
-    #interior stored as [distance, rssi]
     global networkStrength
     networkStrength = {}
 
     environmentBaselineTimer = 0
-    
-    
 
-    #sniffing interface channel parameters
-    ####
     channels = args.channels.split(',')
     channelHopInterval = 1 
-    ####
-    #start sync'd channel hopping in separate thread if multiple
-    #wait for server start signal
+
     print('Waiting for network size')
     size = int(decrypt(conn.recv(1024),aesKey, aesIV))
 
@@ -231,15 +174,12 @@ def main():
         data = conn.recv(1024)
         peerInfo = decrypt(data,aesKey,aesIV)
         peerInfo = peerInfo.split('|')
-        # print(f'adding {msg[1]} to known network clients')
         peerInfo[2] = peerInfo[2].strip('(')
         peerInfo[2] = peerInfo[2].strip(')')
         peerInfo[2] = peerInfo[2].split(',')
         remoteLocation = [float(x) for x in peerInfo[2]]
-        #print(args.location)
         print(f'vector for {peerInfo[1]}: {peerInfo[2]}')
         relativeDistance = get_distance_to_client(remoteLocation, location)
-        # print(f'distance between local and remote: {relativeDistance}')
         networkStrength[peerInfo[1]] = [relativeDistance, 0]
         acknowledge = encrypt('peer recvd', aesKey,aesIV)
         conn.send(acknowledge)
@@ -267,10 +207,8 @@ def main():
     print('starting')
     while True:
         try:
-            # sniff(iface=args.interface, prn=handle_packet, timeout=0.01)
             readSockets,_,_ = select.select([conn],[],[],0)
             
-            # check for server messages
             for packet in readSockets:
                 data = packet.recv(1024)
                 if len(data) == 0:
@@ -281,58 +219,17 @@ def main():
                     conn.close()
                     print(loadCount)
                     exit()
-                # else:
-                #     data = decrypt(data,aesKey,aesIV)
-                #     # data = msg.decode()
-                #     if 'update' not in data:
-                #         continue
-                #     # print(f'recvd {data}')
-                #     data = data.split('update')
-                #     for msg in data:
-                #         if msg =='':
-                #             continue
-                #         # print(msg)
-                #         msg = msg.split('|')
-                #         # print(f'adding {msg[1]} to known network clients')
-                #         msg[2] = msg[2].strip('(')
-                #         msg[2] = msg[2].strip(')')
-                #         msg[2] = msg[2].split(',')
-                #         remoteLocation = [float(x) for x in msg[2]]
-                #         location = args.location.strip('[')
-                #         location = location.strip(']')
-                #         location = location.split(',')
-                #         location = [float(x) for x in location]
-                #         #print(args.location)
-                #         print(f'vector for {msg[1]}: {msg[2]}')
-                #         relativeDistance = get_distance_to_client(remoteLocation, location)
-                #         # print(f'distance between local and remote: {relativeDistance}')
-                #         networkStrength[msg[1]] = [relativeDistance, 0]
-                    # probeFrame = create_probe_request('WallFly', clientID)
-                    # sendp(probeFrame, iface=args.interface, verbose=False)
-                    
 
-            # send sniffed data to server and remove from queue
             while not send_buffer.empty():
                 pkt = send_buffer.get()
                 data = parse_packet(pkt, args.knownMAC, args.ptValue, args.nValue,location)
                 if data:
                     loadCount+=1
-                    # data += (f'|{args.ptValue}|{args.nValue}')
-                    # conn.sendall(data.encode())
                     conn.sendall(encrypt(data,aesKey,aesIV))
 
-            # broadcast ping request for other clients to sniff.
-            ##########
-            # with distance known from server provided blacklist,
-            # the current radio environment can be potentially measured 
-            # and relayed to server to assist with processing.
-            ##########
             environmentBaselineTimer += 1
             if environmentBaselineTimer >= 10000000:
                 environmentBaselineTimer = 0
-                # frame = create_probe_request('wallfly', clientID)
-                # print("broadcasting probe")
-                # sendp(frame, iface=interface, count=1, inter=0.1, verbose=0)
                 sendp(probeFrame, iface=args.interface, verbose=False)
 
         except KeyboardInterrupt:

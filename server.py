@@ -5,25 +5,16 @@ import time
 import datetime
 import select
 import hashlib
-from multiprocessing import pool
 import pandas as pd
 import uuid 
 from collections import defaultdict
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import padding
 import base64
 import numpy as np
 import joblib
-import sqlite3
 import json
 
-
-##################
-# aes 128 key
-#f553692b0eeeb0fc14da46a5a26826164511306cebf2b1ef
-# iv
-#c0dabc32dba054feba4d60c24e7fa50b
 ##################
 # globals
 packets = defaultdict(dict) 
@@ -40,13 +31,11 @@ def get_args():
     parser.add_argument("--databaseAddress", "-da", default=None, help="Database IP")
     parser.add_argument("--databasePort", "-dp", default=None, help="Database port")
     parser.add_argument("--knownLocation", "-loc", default=None, help="Static location vector, use with specified mac sniffing on clients")
-    #parser.add_argument("--interface", "-i", default="wlan0", help="Network interface")
     return parser.parse_args()
 
 def init_server(address, port):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.bind((address, int(port)))
-    # server.setblocking(False)
     server.listen()
     return server
 
@@ -71,9 +60,8 @@ def get_mac_address():
     return id_formatted.lower()
 
 def init_data_defaults(serverMac):
-    physicalLocations = {serverMac:(0,0,0)}
-
     # (x,y,z) for an xy floorplan, z as depth
+    physicalLocations = {serverMac:(0,0,0)}    
     recvDf = pd.DataFrame(columns=['mac','rssi','time', 'ip'])
     recvDf = recvDf.sort_values(by=['mac', 'time'])
 
@@ -89,16 +77,13 @@ def menu(cmd):
     if choice in range(1,7):
         if choice == 4:
             query = input()
-        # break
     else:
         choice = None
-    # print('Please enter a valid number')
 
     return choice, query
 
 def privatize(mac):
     hashed = hashlib.sha256(mac.encode(), usedforsecurity=True).hexdigest()
-    # print(f'hashed mac:{hashed}')
     return hashed    
 
 def rssi_to_dist(rssi, pt, n):
@@ -201,12 +186,7 @@ def order_data(mac_address, client_id, packet_data, locationKnown=False):
     return processed
 
 def process_packets(mac, packetGroup, locationKnown):
-    # Package the three packets and send them for further processing
-    # print(f"Created packet group for {mac}: {packet_group}")
-    # print(packetGroup)
-    
     predictions = None
-
     keys = list(packetGroup.keys())
     rssi_cols = ['rssi1', 'rssi2', 'rssi3']
     pt_cols = ['pt1', 'pt2', 'pt3']
@@ -214,12 +194,6 @@ def process_packets(mac, packetGroup, locationKnown):
     loc_cols = ['loc1', 'loc2', 'loc3']
 
     firstTimeFound = float(packetGroup[keys[0]][0][1])
-    # print(f'firstTime: {firstTimeFound}')
-    
-    # for i in range(len(keys)):
-    #     print(i)
-    #     print(packetGroup[keys[i]][0]) 
-    # print('####')
     
     # Create DataFrame
     packetGroupDF = pd.DataFrame({
@@ -232,18 +206,13 @@ def process_packets(mac, packetGroup, locationKnown):
         loc_cols[i]: [packetGroup[keys[i]][0][4]] for i in range(len(keys))
     })
 
-    # print(packetGroupDF.head())
 
     d1 = rssi_to_dist(packetGroupDF.at[0,'rssi1'],packetGroupDF.at[0,'pt1'],packetGroupDF.at[0,'n1'])
     d2 = rssi_to_dist(packetGroupDF.at[0,'rssi2'],packetGroupDF.at[0,'pt2'],packetGroupDF.at[0,'n2'])
     d3 = rssi_to_dist(packetGroupDF.at[0,'rssi3'],packetGroupDF.at[0,'pt3'],packetGroupDF.at[0,'n3'])
     rssiLoc = rssi_loc(d1,d2,d3,[packetGroupDF.at[0,'loc1'],packetGroupDF.at[0,'loc2'],packetGroupDF.at[0,'loc3']])
-    # print(rssiLoc)
     packetGroupDF['RSSILoc'] = None
     packetGroupDF.at[0,'RSSILoc'] = rssiLoc
-
-    # # packetGroupDF['ToALoc'] = toa_loc()
-    # packetGroupDF['TrueLoc'] = locationKnown
     
     if locationKnown:
         # building a training set
@@ -256,10 +225,6 @@ def process_packets(mac, packetGroup, locationKnown):
         return (groupCount, trainSet)
     else:
         # actually make location prediction
-        # print('#############################################')
-        # print(f"Created packet group for {mac}")
-        # global predictionPipeline
-        
         predictDF = packetGroupDF
 
         for col in ['loc1', 'loc2', 'loc3']:
@@ -271,8 +236,6 @@ def process_packets(mac, packetGroup, locationKnown):
         for col in ['loc1', 'loc2', 'loc3', 'RSSILoc']:
             predictDF[[f'{col}_x', f'{col}_y', f'{col}_z']] = pd.DataFrame(predictDF[col].tolist(), index=predictDF.index)
 
-        #  predictDF.apply(lambda row: rssi_to_dist(row['rssi1'], row['pt1'], row['n1']), axis=1)
-#######################
         if distanceModel is None:
             predictions = [rssiLoc]
         else:
@@ -294,7 +257,6 @@ def process_packets(mac, packetGroup, locationKnown):
                 'n': [row['n3']],
                 'rssidist': [d3]
             }))[0], axis=1)
-#######################
        
             predictDF['locest'] = predictDF.apply(lambda row: rssi_loc(
                 row['distance1'], 
@@ -313,51 +275,32 @@ def process_packets(mac, packetGroup, locationKnown):
 
             for col in ['locest']:
                 predictDF[[f'{col}_x', f'{col}_y', f'{col}_z']] = pd.DataFrame(predictDF[col].tolist(), index=predictDF.index)
-#######################
-        # for col in ['rssi1', 'rssi2', 'rssi3']:
-        #     predictDF[col] = predictDF[col].apply(lambda x: int(x) )
-
-
-        # rssiBins = [-100, -70, -65, -60, -55, -50, -45, -40, -35, -30, -25, -20, 0]
-        # predictDF = apply_binning(predictDF, ['rssi1', 'rssi2', 'rssi3'], rssiBins)
-
-        # predictDF = predictDF.drop(columns=['loc1', 'loc2', 'loc3', 'RSSILoc'])
-        
-        # return predictionPipeline
-        
+                
         if predictionPipeline and distanceModel:
             X = predictDF.drop(columns=['loc1','loc2','loc3','RSSILoc','locest'])
             try:
-            # pipeline will handle scaling, polynomial features, PCA, and the model prediction
                 predictions = predictionPipeline.predict(X)
             except:
                 print('predict failed')
                 print(X.tail(1))
                 predictions = [impLoc]
-            # predictions = np.array_str(predictions[0])
         elif distanceModel:
             # no model found, use base log-distance calc
             predictions = [impLoc]
         
-        print(f'final pred: {predictions}')
+        # print(f'final pred: {predictions}')
 
         timestamp = get_datetime(firstTimeFound)
 
         data = {'type':'insert','MAC': mac, 'Location': f'[{predictions[0][0]},{predictions[0][1]},{predictions[0][2]}]', 'Timestamp': timestamp}
-        # print(data)
-        # print('#############################################')
-        #packetGroupDF.to_json(orient='records')[1:-1]
+
         return json.dumps(data)
 
 def cleanup_old_groups(current_time):
     to_remove = []
-    # return (packets.items())
     for mac_address, client_packets in packets.items():
         # Get the timestamp of the oldest packet in the group
         oldest_timestamp = min(float(data[0][1]) for data in client_packets.values())
-        # print(f'values {client_packets.values()}')
-        # print(f'oldest time is {oldest_timestamp}')
-        # return oldest_timestamp
         
         if current_time - oldest_timestamp > 10:
             to_remove.append(mac_address)
@@ -372,9 +315,6 @@ def encrypt(data, key, iv):
     # print(f'encoding {data}')
     data += '&'
     data = data.encode('utf-8')
-    # padder = padding.PKCS7(algorithms.AES.block_size).padder()
-    # padded_data = padder.update(data.encode()) + padder.finalize()
-    # data = data.encode()
     cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
     encryptor = cipher.encryptor()
     ciphertext = encryptor.update(data) + encryptor.finalize()
@@ -385,13 +325,8 @@ def decrypt(data, key, iv):
     cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
     decryptor = cipher.decryptor()
     decrypted = decryptor.update(ciphertext) + decryptor.finalize()
-    # unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
-    # done = unpadder.update(decrypted) + unpadder.finalize()
-    # print(f'decrp: {done}')
     if b'&' in decrypted:
-        # print(f'possible oversend found, trimming')
         decrypted = decrypted.split(b'&')[0]
-    # print(decrypted)
     try:
         decrypted = decrypted.decode()
     except UnicodeDecodeError:
@@ -418,18 +353,8 @@ def main():
 
     peerNum = 0
 
-    aesKey = b'f553692b0eeeb0fc14da46a5a2682616'#48
-    aesIV = b'c0dabc32dba054fe'#32
-
-    # global packets
-    # packets = defaultdict(dict)  # For storing packets by MAC and client
-    # global AGE_LIMIT
-    # AGE_LIMIT = 10  # seconds
-
-    # global trainSet
-    # trainSet = pd.DataFrame()
-    # global groupCount
-    # groupCount = 0
+    aesKey = b'f553692b0eeeb0fc14da46a5a2682616'#32
+    aesIV = b'c0dabc32dba054fe'#16
 
     global distanceModel
     try:
@@ -455,15 +380,6 @@ def main():
     loadCount = 0
     outputString = ''
 
-    ###############################
-    # # calc distance between server and a client node
-    # position = tuple(float(x) for x in data[2][1:-1].split(','))
-    # print(f'testing::{position[0]}+{position[1]}+{position[2]}')
-    # convertedDistance = round(math.sqrt(position[0]**2+position[1]**2+position[2]**2),3)
-    # print(f'abs dist: {convertedDistance}')
-    # networkBlacklist[data[1]] = convertedDistance
-    ###############################
-
     print(f'\n\nSelect an action:')
     print(f'1: Display Current Connections \t 4: Output DB Query')
     print(f'2: Distribute Netwok Size \t 5: Disconnect Clients')
@@ -472,7 +388,6 @@ def main():
         try:        
             readSockets,_,_ = select.select(connections,[],[],0)
             userInput, _, _ = select.select([sys.stdin], [], [], 0)
-            # dbOutput,_,_ = select.select(db,[],[],0)
 
             input = None
             if userInput:
@@ -481,7 +396,6 @@ def main():
             match(input):
                 case(1):
                     peerNum = 0
-                    #display all active connections
                     for connection in connections:
                         if connection == server:
                             ip,port = connection.getsockname()
@@ -498,36 +412,27 @@ def main():
                     print(f'Distributing network size [{peerNum}]...')
                     for connection in connections:
                         if connection != server and connection != db:
-                            # connection.send('start'.encode())
                             connection.send(encrypt(f'{peerNum}',aesKey,aesIV))
                     print('Done')
                 case(3):
-                    #send mac list to all connected clients
                     print('Distributing Peer List...')
                     for connection in connections:
                         if connection != server and connection != db:
                             ip,port = connection.getpeername()
                             for key, value in networkPositions.items():
-                                # print(f'sending {key}|{value} to {ip}:{port}')
-                                # connection.sendall(f'update|{key}|{value}'.encode())
                                 data = encrypt(f'|{key}|{value}',aesKey,aesIV)
                                 connection.sendall(data)
                                 resp = connection.recv(1024)
-                                # print('send loop: '+decrypt(resp,aesKey,aesIV))
                     print('Done')
                 case(4):
-                    #query DB
                     if db is None:
                         print('No Database connection')
                     else:
-                        
-                        #convert to db format
                         query = json.dumps({'type': 'query', 'query':query})
                         print(f'query for db: {query}')
                         query += '&'
                         db.send(query.encode())
                 case(5):
-                    #disconnect clients
                     tempConnections = []
                     for connection in connections:
                         if connection != server and connection != db:
@@ -539,9 +444,8 @@ def main():
                     connections = tempConnections
                     peerNum = 0
                 case(6):
-                    #close out app
                     print('Server stopped')
-                    print(f'total recv {loadCount}')
+                    # print(f'total recv {loadCount}')
                     for connection in connections:
                         connection.close()
                     outputDFCSV(dbBackup, 'wallfly.csv')
@@ -553,7 +457,6 @@ def main():
                     client_connection, address = server.accept()
                     print(f'New connection from {address[0]}')
                     connections.append(client_connection)
-                    #client_connection.send(networkPositions.keys.encode())
                 elif connection == db:
                     msg = connection.recv(2048)
                     if not msg:
@@ -561,7 +464,6 @@ def main():
                         print(f'#######\nConnection to Database lost, reverting to csv output\n#######')
                         db = None
                     else:
-                        # pass
                         msg = msg.decode()
                         if msg[0] == '&':
                             print(msg[1:])
@@ -572,7 +474,6 @@ def main():
                             for x in entryList:
                                 print(x)
                             outputString = ''
-                        #parse more of db output
                 else:
                     msg = connection.recv(1024)
                     
@@ -591,24 +492,15 @@ def main():
                         msg = decrypt(msg,aesKey,aesIV)
                         if msg is None:
                             continue
-                        
-                        # msg=msg.decode()
-                        # print(msg)
                         data = msg.split('|')
                         if data[0] == 'init':
                             data[2] = data[2].strip('[')
                             data[2] = data[2].strip(']')
                             convertedPosition = tuple(float(x) for x in data[2].split(','))
-                            networkPositions[data[1]] = convertedPosition
-                            # print(f'testing::{convertedPosition[0]}+{convertedPosition[1]}+{convertedPosition[2]}')
-                            # convertedDistance = round(math.sqrt(convertedPosition[0]**2+convertedPosition[1]**2+convertedPosition[2]**2),3)
-                            # print(f'abs dist: {convertedDistance}')
-                            
+                            networkPositions[data[1]] = convertedPosition                            
                             continue
-                        # data.append(address[0])
 
                         ip, _ = connection.getpeername()
-                        # print(f'{ip} sent {data}')
                         try:
                             hashed_mac = privatize(data[0])
                             rssi = data[1]
@@ -618,14 +510,10 @@ def main():
                             loc = data[5]
                         except IndexError:
                             continue
-                        # environment = data[5::]
-                        # src = ip
                         if rssi == 'None':
                             rssi = 0
                         result = order_data(hashed_mac, ip, (rssi, timestamp, pt, n, loc), args.knownLocation)
                         if result:
-                            # print(f'Insert to DB:\n{result}')
-                            
                             if db:
                                 result += '&'
                                 db.sendall(result.encode())
@@ -638,12 +526,7 @@ def main():
                                     outputDFCSV(dbBackup, 'wallfly.csv')
                                     dbBackup = pd.DataFrame()
                                 
-                        loadCount+=1
-                        # row = pd.DataFrame({'mac':[hashed_mac], 'rssi':[rssi], 'time':[timestamp], 'ip':[src]})
-                        # inputSet = pd.concat([inputSet,row], ignore_index=True)
-            # process_set = getNext(input_set)
-            # location = calcPosition(process_set)
-            # storeLocation(location)
+                        # loadCount+=1
 
 
         except KeyboardInterrupt:
