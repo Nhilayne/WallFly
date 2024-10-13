@@ -215,16 +215,13 @@ def process_packets(mac, packetGroup, locationKnown):
     packetGroupDF.at[0,'RSSILoc'] = rssiLoc
     
     if locationKnown:
-        # building a training set
         global trainSet
         global groupCount
         groupCount += 1
         packetGroupDF['TrueLoc'] = locationKnown
         trainSet = pd.concat([trainSet, packetGroupDF], ignore_index=True)
-        # print(f'packet groups found: {groupCount}')
         return (groupCount, trainSet)
     else:
-        # actually make location prediction
         predictDF = packetGroupDF
 
         for col in ['loc1', 'loc2', 'loc3']:
@@ -268,7 +265,6 @@ def process_packets(mac, packetGroup, locationKnown):
                 ]), axis=1)
             
             impLoc = predictDF.at[0,'locest']
-            print(f'imploc: {impLoc}')
             
             for col in ['locest']:
                 predictDF[col] = predictDF[col].apply(lambda x: x if isinstance(x, list) and len(x) == 3 else [0.0, 0.0, 0.0])
@@ -281,14 +277,11 @@ def process_packets(mac, packetGroup, locationKnown):
             try:
                 predictions = predictionPipeline.predict(X)
             except:
-                print('predict failed')
-                print(X.tail(1))
                 predictions = [impLoc]
         elif distanceModel:
-            # no model found, use base log-distance calc
             predictions = [impLoc]
         
-        # print(f'final pred: {predictions}')
+        # print(f'location: {predictions}')
 
         timestamp = get_datetime(firstTimeFound)
 
@@ -299,20 +292,18 @@ def process_packets(mac, packetGroup, locationKnown):
 def cleanup_old_groups(current_time):
     to_remove = []
     for mac_address, client_packets in packets.items():
-        # Get the timestamp of the oldest packet in the group
         oldest_timestamp = min(float(data[0][1]) for data in client_packets.values())
         
         if current_time - oldest_timestamp > 10:
             to_remove.append(mac_address)
     for mac_address in to_remove:
-        # print(f"Removing stale packets for MAC: {mac_address}")
+        print(f"Removing stale packets for MAC: {mac_address}")
         del packets[mac_address]
 
 def outputDFCSV(outputDF, filename):
     outputDF.to_csv(filename, mode='a', header=not pd.io.common.file_exists(filename),index=False)
 
 def encrypt(data, key, iv):
-    # print(f'encoding {data}')
     data += '&'
     data = data.encode('utf-8')
     cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
@@ -365,7 +356,7 @@ def main():
     
     global predictionPipeline
     try:
-        predictionPipeline = joblib.load('wallflyFitModel3.pkl')
+        predictionPipeline = joblib.load('wallflyFitModel.pkl')
         
         if distanceModel:
             print('Location model loaded successfully')
@@ -512,6 +503,7 @@ def main():
                             continue
                         if rssi == 'None':
                             rssi = 0
+                        print(hashed_mac, ip, (rssi, timestamp, pt, n, loc))
                         result = order_data(hashed_mac, ip, (rssi, timestamp, pt, n, loc), args.knownLocation)
                         if result:
                             if db:

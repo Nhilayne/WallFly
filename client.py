@@ -217,14 +217,14 @@ def main():
                 if not data:
                     print('Server connection closed')
                     conn.close()
-                    print(loadCount)
+                    # print(loadCount)
                     exit()
 
             while not send_buffer.empty():
                 pkt = send_buffer.get()
                 data = parse_packet(pkt, args.knownMAC, args.ptValue, args.nValue,location)
                 if data:
-                    loadCount+=1
+                    # loadCount+=1
                     conn.sendall(encrypt(data,aesKey,aesIV))
 
             environmentBaselineTimer += 1
