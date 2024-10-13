@@ -55,11 +55,16 @@ def connect_db(dbAddress, dbPort):
         print("No database connection, tracking results will be saved to wallfly.csv")
         return None
     else:
-        print(f"connecting to database at {dbAddress}:{dbPort}")
-        connection = socket.socket()
-        connection.connect((dbAddress, int(dbPort)))
-        return connection
-
+        print(f"Connecting to database at {dbAddress}:{dbPort}...")
+        try:
+            connection = socket.socket()
+            connection.connect((dbAddress, int(dbPort)))
+            print('Success')
+            return connection
+        except ConnectionRefusedError:
+            print(f'Connection to database at {dbAddress}:{dbPort} refused, tracking results will be saved to wallfly.csv')
+            return None
+        
 def get_mac_address():
     id = uuid.getnode()
     id_formatted = ':'.join(('%012x'%id)[i:i+2] for i in range(0,12,2))
@@ -100,10 +105,14 @@ def rssi_to_dist(rssi, pt, n):
     return 10**((float(pt)-float(rssi)) / (10*float(n)))
 
 def rssi_loc(d1,d2,d3,locs):
-
-    loc1 = (float(x) for x in locs[0].strip('[]').split(','))
-    loc2 = (float(x) for x in locs[1].strip('[]').split(','))
-    loc3 = (float(x) for x in locs[2].strip('[]').split(','))
+    if type(locs[0]) is str:
+        loc1 = (float(x) for x in locs[0].strip('[]').split(','))
+        loc2 = (float(x) for x in locs[1].strip('[]').split(','))
+        loc3 = (float(x) for x in locs[2].strip('[]').split(','))
+    else:
+        loc1 = locs[0]
+        loc2 = locs[1]
+        loc3 = locs[2]
     x1,y1,z1 = loc1
     x2,y2,z2 = loc2
     x3,y3,z3 = loc3
@@ -297,6 +306,7 @@ def process_packets(mac, packetGroup, locationKnown):
                 ]), axis=1)
             
             impLoc = predictDF.at[0,'locest']
+            print(f'imploc: {impLoc}')
             
             for col in ['locest']:
                 predictDF[col] = predictDF[col].apply(lambda x: x if isinstance(x, list) and len(x) == 3 else [0.0, 0.0, 0.0])
@@ -316,18 +326,20 @@ def process_packets(mac, packetGroup, locationKnown):
         # return predictionPipeline
         
         if predictionPipeline and distanceModel:
-            X = predictDF.drop(columns=['rssi1','rssi2','rssi3','pt1','pt2','pt3','n1','n2','n3','locest'])
+            X = predictDF.drop(columns=['loc1','loc2','loc3','RSSILoc','locest'])
             try:
             # pipeline will handle scaling, polynomial features, PCA, and the model prediction
                 predictions = predictionPipeline.predict(X)
             except:
+                print('predict failed')
                 print(X.tail(1))
+                predictions = [impLoc]
             # predictions = np.array_str(predictions[0])
         elif distanceModel:
             # no model found, use base log-distance calc
             predictions = [impLoc]
         
-        # print(predictions)
+        print(f'final pred: {predictions}')
 
         timestamp = get_datetime(firstTimeFound)
 
@@ -428,7 +440,7 @@ def main():
     
     global predictionPipeline
     try:
-        predictionPipeline = joblib.load('wallflyFitModel.pkl')
+        predictionPipeline = joblib.load('wallflyFitModel3.pkl')
         
         if distanceModel:
             print('Location model loaded successfully')
@@ -441,6 +453,7 @@ def main():
     dbBackup = pd.DataFrame()
 
     loadCount = 0
+    outputString = ''
 
     ###############################
     # # calc distance between server and a client node
@@ -549,7 +562,16 @@ def main():
                         db = None
                     else:
                         # pass
-                        print(msg.decode())
+                        msg = msg.decode()
+                        if msg[0] == '&':
+                            print(msg[1:])
+                            continue
+                        outputString += msg
+                        if outputString[-1] == '&':
+                            entryList = json.loads(outputString[0:-1])
+                            for x in entryList:
+                                print(x)
+                            outputString = ''
                         #parse more of db output
                 else:
                     msg = connection.recv(1024)

@@ -78,10 +78,10 @@ def handle_query(db, query):
     try:
         cursor.execute(query)
         results = cursor.fetchall()
-        return json.dumps(results)  # Send results back as JSON
+        return json.dumps(results) +'&' # Send results back as JSON
     except sqlite3.Error as e:
         print('sqlite error in query')
-        return json.dumps({"error": str(e)})
+        return '&'+json.dumps({"error": str(e)})
 
 # Handle each client connection
 def handle_client(request, db):
@@ -95,7 +95,7 @@ def handle_client(request, db):
             # Handle insert data
             insert_data(db, data)
             # client_socket.send(b"Data received and inserted successfully.")
-            response = 'Data received and inserted successfully.'
+            response = '&Data received and inserted successfully.'
         elif data.get("type") == "query":
             # print('querying')
             # Handle SQL query
@@ -106,13 +106,13 @@ def handle_client(request, db):
                 # client_socket.send(response.encode('utf-8'))
             else:
                 # client_socket.send(b"Invalid query format.")
-                response = 'invalid query format'
+                response = '&Invalid query format'
         else:
             # client_socket.send(b"Unknown request type.")
-            response = 'unsupported request type'
+            response = '&Unsupported request type'
     except Exception as e:
         print(f"Error: {e}")
-        response = f'Error: {e}'
+        response = f'&Error: {e}'
         # client_socket.send(b"Failed to process request.")
     # finally:
     #     client_socket.close()
